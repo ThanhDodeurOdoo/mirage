@@ -1,0 +1,6 @@
+//! experiment in synthetic video generation
+//!
+//! generates pixels and encodes video in memory. Callers drive
+//! each step and handle file output, network transport and real-time scheduling.
+
+#![forbid(unsafe_code)]
