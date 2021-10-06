@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2018"
 description = "A small library for generating synthetic video"
 publish = false
+
+[dependencies]
+openh264 = { version = "=0.2.8", default-features = false, features = ["encoder"] }
