@@ -4,3 +4,9 @@
 //! each step and handle file output, network transport and real-time scheduling.
 
 #![forbid(unsafe_code)]
+
+mod config;
+mod error;
+
+pub use config::{Config, Pattern, FRAMES_PER_SECOND};
+pub use error::Error;
