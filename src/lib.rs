@@ -1,7 +1,13 @@
-//! experiment in synthetic video generation
+//! Caller-driven H.264. Generator API planned:
+//! - `Generator::new(Config) -> Result<Generator, Error>`: `Error::Encoder`.
+//! - `generate(&mut self) -> Result<EncodeOutcome, Error>`:
+//!   `Error::Encoder`, `Error::Faulted` or `Error::TimelineExhausted`.
+//! - `raw_frame(&self) -> Option<RawFrame<'_>>`: borrowed pixels.
 //!
-//! generates pixels and encodes video in memory. Callers drive
-//! each step and handle file output, network transport and real-time scheduling.
+//! Fixed config, no I/O. Start at frame zero, advance on emitted or skipped output.
+//! Encoder failure faults the stream. Create a new generator to restart.
+//! Raw pixels are absent before a completed step and after encoder failure.
+//! Raw borrows prevent generation. Emitted bytes outlive later calls.
 
 #![forbid(unsafe_code)]
 
