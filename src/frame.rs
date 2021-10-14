@@ -33,7 +33,7 @@ impl<'a> RawFrame<'a> {
     }
 }
 
-const BLACK: u8 = 16;
+pub(crate) const BLACK: u8 = 16;
 const NEUTRAL_CHROMA: u8 = 128;
 
 pub(crate) struct YuvFrame {

@@ -14,6 +14,7 @@
 mod config;
 mod error;
 mod frame;
+mod pattern;
 
 pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
