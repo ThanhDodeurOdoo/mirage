@@ -137,7 +137,6 @@ pub enum EncodeOutcome {
 mod tests {
     use super::*;
     use crate::Pattern;
-    use openh264::encoder::{Encoder, EncoderConfig};
 
     #[test]
     fn compact_plane_layout() {
@@ -190,18 +189,5 @@ mod tests {
                 addresses
             );
         }
-    }
-
-    #[test]
-    fn encoder_accepts_compact_planes() -> Result<(), openh264::Error> {
-        for &(width, height) in &[(18, 18), (320, 240)] {
-            let config = Config::new(width, height, 1_000_000, Pattern::Checkerboard).unwrap();
-            let frame = YuvFrame::new(config);
-            let encoder_config =
-                EncoderConfig::new(width, height).set_bitrate_bps(config.bitrate_bps());
-            let mut encoder = Encoder::with_config(encoder_config)?;
-            assert!(!encoder.encode(&frame)?.to_vec().is_empty());
-        }
-        Ok(())
     }
 }

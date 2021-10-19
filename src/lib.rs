@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod encoder;
 mod error;
 mod frame;
 mod pattern;
