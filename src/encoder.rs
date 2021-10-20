@@ -1,6 +1,6 @@
 use crate::frame::YuvFrame;
-use crate::{Config, Error};
-use openh264::encoder::{EncodedBitStream, EncoderConfig};
+use crate::{Config, EncodeOutcome, Error, FrameKind, FrameMetadata};
+use openh264::encoder::{EncoderConfig, FrameType};
 
 pub(crate) struct Encoder(openh264::encoder::Encoder);
 
@@ -13,16 +13,60 @@ impl Encoder {
             .map_err(Error::Encoder)
     }
 
-    pub(crate) fn encode(&mut self, frame: &YuvFrame) -> Result<EncodedBitStream<'_>, Error> {
-        self.0.encode(frame).map_err(Error::Encoder)
+    pub(crate) fn encode(
+        &mut self,
+        frame: &YuvFrame,
+        metadata: FrameMetadata,
+    ) -> Result<EncodeOutcome, Error> {
+        let stream = self.0.encode(frame).map_err(Error::Encoder)?;
+        package(metadata, stream.frame_type(), || stream.to_vec())
     }
+}
+
+fn package(
+    metadata: FrameMetadata,
+    frame_type: FrameType,
+    copy_bytes: impl FnOnce() -> Vec<u8>,
+) -> Result<EncodeOutcome, Error> {
+    let kind = match frame_type {
+        FrameType::IDR => FrameKind::Idr,
+        FrameType::I => FrameKind::I,
+        FrameType::P => FrameKind::P,
+        FrameType::IPMixed => FrameKind::IpMixed,
+        FrameType::Skip => return Ok(EncodeOutcome::Skipped { metadata }),
+        FrameType::Invalid => {
+            return Err(Error::Encoder(openh264::Error::msg(
+                "encoder returned an invalid frame type",
+            )))
+        }
+    };
+    let bytes = copy_bytes();
+    if bytes.is_empty() {
+        return Err(Error::Encoder(openh264::Error::msg(
+            "encoder returned an empty picture",
+        )));
+    }
+    Ok(EncodeOutcome::Emitted {
+        metadata,
+        bytes,
+        kind,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::render_checkerboard;
+    use crate::pattern::{render_checkerboard, render_moving_rectangle};
     use crate::Pattern;
+    use std::error::Error as _;
+    use std::time::Duration;
+
+    fn source_metadata() -> FrameMetadata {
+        FrameMetadata {
+            source_index: 61,
+            timestamp: Duration::new(1, 16_666_666),
+        }
+    }
 
     #[test]
     fn encodes_configured_checkerboards() -> Result<(), Error> {
@@ -31,8 +75,87 @@ mod tests {
             let mut frame = YuvFrame::new(config);
             render_checkerboard(&mut frame);
             let mut encoder = Encoder::new(config)?;
-            assert!(!encoder.encode(&frame)?.to_vec().is_empty());
+            match encoder.encode(&frame, source_metadata())? {
+                EncodeOutcome::Emitted {
+                    metadata,
+                    bytes,
+                    kind,
+                } => {
+                    assert_eq!(metadata, source_metadata());
+                    assert_eq!(kind, FrameKind::Idr);
+                    let nal_types: Vec<_> = bytes
+                        .windows(4)
+                        .filter(|window| window[..3] == [0, 0, 1])
+                        .map(|window| window[3] & 31)
+                        .collect();
+                    assert_eq!(&nal_types[..2], &[7, 8]);
+                    assert!(nal_types[2..].contains(&5));
+                }
+                EncodeOutcome::Skipped { .. } => panic!("first picture was skipped"),
+            }
         }
         Ok(())
+    }
+
+    #[test]
+    fn retained_bytes_survive_later_encoding() -> Result<(), Error> {
+        let config = Config::default();
+        let mut encoder = Encoder::new(config)?;
+        let mut frame = YuvFrame::new(config);
+        render_checkerboard(&mut frame);
+        let first = match encoder.encode(&frame, source_metadata())? {
+            EncodeOutcome::Emitted { bytes, .. } => bytes,
+            EncodeOutcome::Skipped { .. } => panic!("first picture was skipped"),
+        };
+        let expected = first.clone();
+        for index in 1..=16 {
+            render_moving_rectangle(&mut frame, index);
+            encoder.encode(&frame, crate::timeline::step(index)?.0)?;
+        }
+        drop(encoder);
+        assert_eq!(first, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_emitted_kinds_and_bytes() {
+        for &(native, expected) in &[
+            (FrameType::IDR, FrameKind::Idr),
+            (FrameType::I, FrameKind::I),
+            (FrameType::P, FrameKind::P),
+            (FrameType::IPMixed, FrameKind::IpMixed),
+        ] {
+            match package(source_metadata(), native, || vec![0, 0, 0, 1, 65]).unwrap() {
+                EncodeOutcome::Emitted {
+                    metadata,
+                    bytes,
+                    kind,
+                } => {
+                    assert_eq!(metadata, source_metadata());
+                    assert_eq!(bytes, [0, 0, 0, 1, 65]);
+                    assert_eq!(kind, expected);
+                }
+                EncodeOutcome::Skipped { .. } => panic!("emitted picture became a skip"),
+            }
+            let error = package(source_metadata(), native, Vec::new).unwrap_err();
+            assert!(matches!(error, Error::Encoder(_)));
+            assert!(error.source().unwrap().is::<openh264::Error>());
+        }
+    }
+
+    #[test]
+    fn skips_and_invalid_types_do_not_copy_bytes() {
+        let skipped = package(source_metadata(), FrameType::Skip, || {
+            panic!("copied a skip")
+        })
+        .unwrap();
+        assert!(matches!(
+            skipped,
+            EncodeOutcome::Skipped { metadata } if metadata == source_metadata()
+        ));
+        let invalid = package(source_metadata(), FrameType::Invalid, || {
+            panic!("copied invalid output")
+        });
+        assert!(matches!(invalid, Err(Error::Encoder(_))));
     }
 }
