@@ -1,4 +1,4 @@
-//! Caller-driven H.264. Generator API planned:
+//! Caller-driven H.264.
 //! - `Generator::new(Config) -> Result<Generator, Error>`: `Error::Encoder`.
 //! - `generate(&mut self) -> Result<EncodeOutcome, Error>`:
 //!   `Error::Encoder`, `Error::Faulted` or `Error::TimelineExhausted`.
@@ -15,9 +15,11 @@ mod config;
 mod encoder;
 mod error;
 mod frame;
+mod generator;
 mod pattern;
 mod timeline;
 
 pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
+pub use generator::Generator;
