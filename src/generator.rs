@@ -99,6 +99,42 @@ mod tests {
     }
 
     #[test]
+    fn visual_counter_wraps_across_skipped_steps() -> Result<(), Error> {
+        let config = Config::new(16, 16, 1_000_000, Pattern::MovingRectangle)?;
+        let mut generator = Generator::new(config)?;
+        generator.next_index = 254;
+        for &(index, nanos, row) in &[
+            (
+                254,
+                233_333_333,
+                [
+                    16, 16, 235, 235, 235, 235, 235, 235, 235, 235, 235, 235, 235, 235, 235, 235,
+                ],
+            ),
+            (255, 250_000_000, [235; 16]),
+            (256, 266_666_666, [16; 16]),
+        ] {
+            let outcome = if index == 255 {
+                let skipped = generator
+                    .generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
+                assert!(matches!(skipped, EncodeOutcome::Skipped { .. }));
+                skipped
+            } else {
+                generator.generate()?
+            };
+            let metadata = match outcome {
+                EncodeOutcome::Emitted { metadata, .. } | EncodeOutcome::Skipped { metadata } => {
+                    metadata
+                }
+            };
+            assert_eq!(metadata.source_index, index);
+            assert_eq!(metadata.timestamp, Duration::new(4, nanos));
+            assert_eq!(generator.raw_frame().unwrap().y()[14 * 16..], row.repeat(2));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn encoder_failure_hides_pixels_and_faults_the_stream() -> Result<(), Error> {
         let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
         let mut generator = Generator::new(config)?;

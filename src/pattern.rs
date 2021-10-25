@@ -3,6 +3,7 @@ use crate::frame::{YuvFrame, BLACK};
 const CELL_SIZE: usize = 8;
 const WHITE: u8 = 235;
 const MOTION_PERIOD: u64 = 240;
+const COUNTER_BITS: usize = 8;
 
 pub(crate) fn render_checkerboard(frame: &mut YuvFrame) {
     let width = frame.view().width() as usize;
@@ -23,15 +24,26 @@ pub(crate) fn render_moving_rectangle(frame: &mut YuvFrame, source_index: u64) {
     let height = raw.height() as usize;
     let rectangle_width = width / 4;
     let rectangle_height = height / 4;
+    let strip_top = height - height / 8;
     let phase = source_index % MOTION_PERIOD;
     let progress = phase.min(MOTION_PERIOD - phase) as usize;
     let half_period = (MOTION_PERIOD / 2) as usize;
     let x = (width - rectangle_width) * progress / half_period;
-    let y = (height - rectangle_height) * progress / half_period;
+    let y = (strip_top - rectangle_height) * progress / half_period;
     let luma = frame.y_mut();
     luma.fill(BLACK);
     for row in luma.chunks_mut(width).skip(y).take(rectangle_height) {
         row[x..x + rectangle_width].fill(WHITE);
+    }
+    for row in luma.chunks_mut(width).skip(strip_top) {
+        for bit in 0..COUNTER_BITS {
+            let value = if source_index & (1 << bit) == 0 {
+                BLACK
+            } else {
+                WHITE
+            };
+            row[bit * width / COUNTER_BITS..(bit + 1) * width / COUNTER_BITS].fill(value);
+        }
     }
 }
 
@@ -111,7 +123,14 @@ mod tests {
 
     fn assert_rectangle(frame: &YuvFrame, left: usize, top: usize, width: usize, height: usize) {
         let raw = frame.view();
-        for (y, row) in raw.y().chunks(raw.width() as usize).enumerate() {
+        let strip_top = (raw.height() - raw.height() / 8) as usize;
+        assert!(top + height <= strip_top);
+        for (y, row) in raw
+            .y()
+            .chunks(raw.width() as usize)
+            .take(strip_top)
+            .enumerate()
+        {
             for (x, &value) in row.iter().enumerate() {
                 let inside = (left..left + width).contains(&x) && (top..top + height).contains(&y);
                 assert_eq!(value, if inside { 235 } else { 16 }, "pixel ({}, {})", x, y);
@@ -134,7 +153,7 @@ mod tests {
             let config = Config::new(width, height, 1_000_000, Pattern::MovingRectangle).unwrap();
             let mut frame = YuvFrame::new(config);
             let travel_x = width as usize - rectangle_width;
-            let travel_y = height as usize - rectangle_height;
+            let travel_y = (height - height / 8) as usize - rectangle_height;
             for &(index, x, y) in &[
                 (0, 0, 0),
                 (60, travel_x / 2, travel_y / 2),
@@ -151,16 +170,18 @@ mod tests {
     fn moving_rectangle_bounces_without_trails() {
         let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle).unwrap();
         let mut frame = YuvFrame::new(config);
+        let body_len = 320 * 210;
         frame.y_mut().fill(89);
         render_moving_rectangle(&mut frame, 119);
-        assert_rectangle(&frame, 238, 178, 80, 60);
+        assert_rectangle(&frame, 238, 148, 80, 60);
         let raw = frame.view();
         let expected = raw.y().to_vec();
         let addresses = (raw.y().as_ptr(), raw.u().as_ptr(), raw.v().as_ptr());
         render_moving_rectangle(&mut frame, 120);
-        assert_rectangle(&frame, 240, 180, 80, 60);
+        assert_rectangle(&frame, 240, 150, 80, 60);
         render_moving_rectangle(&mut frame, 121);
-        assert_eq!(frame.view().y(), expected.as_slice());
+        assert_eq!(&frame.view().y()[..body_len], &expected[..body_len]);
+        let expected = frame.view().y().to_vec();
         for &previous_luma in &[0, 255] {
             frame.y_mut().fill(previous_luma);
             render_moving_rectangle(&mut frame, 121);
@@ -184,7 +205,7 @@ mod tests {
         }
         let mut direct = YuvFrame::new(config);
         render_moving_rectangle(&mut direct, 137);
-        assert_rectangle(&direct, 12, 12, 4, 4);
+        assert_rectangle(&direct, 12, 10, 4, 4);
         assert_eq!(direct.view().y(), sequential.view().y());
     }
 
@@ -192,12 +213,89 @@ mod tests {
     fn moving_rectangle_handles_large_indices() {
         let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle).unwrap();
         let mut frame = YuvFrame::new(config);
+        let body_len = 320 * 210;
         render_moving_rectangle(&mut frame, u64::MAX);
-        assert_rectangle(&frame, 30, 22, 80, 60);
+        assert_rectangle(&frame, 30, 18, 80, 60);
         let expected = frame.view().y().to_vec();
+        assert!(expected[body_len..].iter().all(|&value| value == 235));
         render_moving_rectangle(&mut frame, 15);
-        assert_eq!(frame.view().y(), expected.as_slice());
+        assert_eq!(&frame.view().y()[..body_len], &expected[..body_len]);
         render_moving_rectangle(&mut frame, u64::MAX - 240);
+        assert_eq!(&frame.view().y()[..body_len], &expected[..body_len]);
+        render_moving_rectangle(&mut frame, u64::MAX - 3840);
+        assert_eq!(frame.view().y(), expected.as_slice());
+    }
+
+    #[test]
+    fn counter_strip_has_lsb_first_cells_and_wraps() {
+        let minimum_rows: &[(u64, &[u8])] = &[
+            (0, &[16; 16]),
+            (
+                1,
+                &[
+                    235, 235, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
+                ],
+            ),
+            (255, &[235; 16]),
+            (256, &[16; 16]),
+            (
+                128,
+                &[
+                    16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 235, 235,
+                ],
+            ),
+            (
+                85,
+                &[
+                    235, 235, 16, 16, 235, 235, 16, 16, 235, 235, 16, 16, 235, 235, 16, 16,
+                ],
+            ),
+        ];
+        let partial_rows: &[(u64, &[u8])] = &[
+            (0, &[16; 18]),
+            (
+                1,
+                &[
+                    235, 235, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
+                ],
+            ),
+            (255, &[235; 18]),
+            (256, &[16; 18]),
+            (
+                128,
+                &[
+                    16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 235, 235, 235,
+                ],
+            ),
+            (
+                85,
+                &[
+                    235, 235, 16, 16, 235, 235, 16, 16, 16, 235, 235, 16, 16, 235, 235, 16, 16, 16,
+                ],
+            ),
+        ];
+        for &(width, rows) in &[(16, minimum_rows), (18, partial_rows)] {
+            let config = Config::new(width, width, 1_000_000, Pattern::MovingRectangle).unwrap();
+            let mut frame = YuvFrame::new(config);
+            for &(index, expected) in rows {
+                frame.y_mut().fill(89);
+                render_moving_rectangle(&mut frame, index);
+                let strip = &frame.view().y()[(width * (width - width / 8)) as usize..];
+                assert_eq!(strip, expected.repeat((width / 8) as usize).as_slice());
+            }
+        }
+    }
+
+    #[test]
+    fn complete_moving_picture_repeats_after_3840_steps() {
+        let config = Config::new(18, 18, 1_000_000, Pattern::MovingRectangle).unwrap();
+        let mut frame = YuvFrame::new(config);
+        render_moving_rectangle(&mut frame, 0);
+        let expected = frame.view().y().to_vec();
+        render_moving_rectangle(&mut frame, 240);
+        assert_eq!(&frame.view().y()[..288], &expected[..288]);
+        assert_ne!(frame.view().y(), expected.as_slice());
+        render_moving_rectangle(&mut frame, 3840);
         assert_eq!(frame.view().y(), expected.as_slice());
     }
 }
