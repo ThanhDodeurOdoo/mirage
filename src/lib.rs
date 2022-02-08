@@ -1,12 +1,12 @@
-//! Tiny test pictures, real H.264. No camera needed.
+//! Small test pictures, real H.264. No camera needed.
 //!
 //! Pick a [`Pattern::Checkerboard`] or a [`Pattern::MovingRectangle`] with a
 //! little frame counter. [`Generator`] draws grayscale I420 pixels and encodes
 //! them with OpenH264. You handle pacing, files and networking.
 //!
-//! # Give it a spin
+//! # use like that
 //!
-//! ```
+//! ```rust
 //! use mirage::{Config, EncodeOutcome, Generator, Pattern};
 //! let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
 //! let mut video = Generator::new(config)?;
