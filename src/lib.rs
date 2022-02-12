@@ -38,6 +38,13 @@
 //! and height. It returns `None` before the first completed step or after an
 //! encoder failure. Finish using that borrow before generating more pixels.
 //!
+//! [`nal_units`] borrows NALs from one caller-delimited Annex B picture, including
+//! each NAL header. It strips three- or four-byte prefixes and zero padding,
+//! preserves unknown NAL types and leaves escaped payload bytes alone.
+//! Empty input or missing framing returns [`Error::InvalidAnnexB`], an empty NAL
+//! returns [`Error::EmptyNalUnit`] and a set forbidden bit returns
+//! [`Error::InvalidNalHeader`]. Iteration stops after an error.
+//!
 //! # When things go wrong
 //!
 //! [`Config::new`] can return [`Error::InvalidDimensions`], [`Error::InvalidBitrate`]
@@ -53,6 +60,7 @@ mod encoder;
 mod error;
 mod frame;
 mod generator;
+mod h264;
 mod pattern;
 mod timeline;
 
@@ -60,3 +68,4 @@ pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
 pub use generator::Generator;
+pub use h264::{nal_units, NalUnit, NalUnits};

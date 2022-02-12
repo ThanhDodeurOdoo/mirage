@@ -83,11 +83,9 @@ mod tests {
                 } => {
                     assert_eq!(metadata, source_metadata());
                     assert_eq!(kind, FrameKind::Idr);
-                    let nal_types: Vec<_> = bytes
-                        .windows(4)
-                        .filter(|window| window[..3] == [0, 0, 1])
-                        .map(|window| window[3] & 31)
-                        .collect();
+                    let nal_types = crate::nal_units(&bytes)
+                        .map(|nal| nal.map(|nal| nal.nal_type()))
+                        .collect::<Result<Vec<_>, _>>()?;
                     assert_eq!(&nal_types[..2], &[7, 8]);
                     assert!(nal_types[2..].contains(&5));
                 }
