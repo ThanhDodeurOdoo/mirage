@@ -57,6 +57,49 @@ fn start_code(bytes: &[u8]) -> Option<usize> {
     bytes.windows(3).position(|window| window == [0, 0, 1])
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Sps<'a> {
+    pub nal: NalUnit<'a>,
+    pub profile_idc: u8,
+    pub constraints: u8,
+    pub level_idc: u8,
+}
+
+#[derive(Debug)]
+pub struct PictureHeaders<'a> {
+    pub sps: Option<Sps<'a>>,
+    pub pps: Option<NalUnit<'a>>,
+    pub has_idr: bool,
+}
+
+pub fn inspect_picture(bytes: &[u8]) -> Result<PictureHeaders<'_>, Error> {
+    let mut headers = PictureHeaders {
+        sps: None,
+        pps: None,
+        has_idr: false,
+    };
+    for nal in nal_units(bytes) {
+        let nal = nal?;
+        match nal.nal_type() {
+            7 => {
+                let fields = nal.bytes().get(1..4).ok_or(Error::TruncatedSps)?;
+                headers.sps.get_or_insert(Sps {
+                    nal,
+                    profile_idc: fields[0],
+                    constraints: fields[1],
+                    level_idc: fields[2],
+                });
+            }
+            8 => {
+                headers.pps.get_or_insert(nal);
+            }
+            5 => headers.has_idr = true,
+            _ => {}
+        }
+    }
+    Ok(headers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +140,30 @@ mod tests {
             nal_units(&[0, 0, 1, 255]).next(),
             Some(Err(Error::InvalidNalHeader))
         ));
+    }
+
+    #[test]
+    fn inspects_only_the_available_headers() -> Result<(), Error> {
+        let bytes = [
+            0, 0, 1, 103, 66, 192, 31, 0, 0, 1, 104, 128, 0, 0, 1, 101, 128,
+        ];
+        let headers = inspect_picture(&bytes)?;
+        let sps = headers.sps.unwrap();
+        assert_eq!(
+            (sps.profile_idc, sps.constraints, sps.level_idc),
+            (66, 192, 31)
+        );
+        assert_eq!(sps.nal.bytes().as_ptr(), bytes[3..].as_ptr());
+        assert_eq!(headers.pps.unwrap().bytes(), &[104, 128]);
+        assert!(headers.has_idr);
+        let ordinary_slice = inspect_picture(&[0, 0, 1, 65, 128])?;
+        assert!(ordinary_slice.sps.is_none());
+        assert!(ordinary_slice.pps.is_none());
+        assert!(!ordinary_slice.has_idr);
+        assert!(matches!(
+            inspect_picture(&[0, 0, 1, 103, 66, 192]),
+            Err(Error::TruncatedSps)
+        ));
+        Ok(())
     }
 }

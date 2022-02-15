@@ -44,6 +44,10 @@
 //! Empty input or missing framing returns [`Error::InvalidAnnexB`], an empty NAL
 //! returns [`Error::EmptyNalUnit`] and a set forbidden bit returns
 //! [`Error::InvalidNalHeader`]. Iteration stops after an error.
+//! [`inspect_picture`] keeps the first SPS/PPS views and reports type-5 IDR NALs.
+//! It reads the SPS profile, constraint byte and level, returning
+//! [`Error::TruncatedSps`] if those bytes are missing from any SPS. It does not
+//! parse slices or prove decoder compatibility. An ordinary I picture is not IDR.
 //!
 //! # When things go wrong
 //!
@@ -68,4 +72,4 @@ pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
 pub use generator::Generator;
-pub use h264::{nal_units, NalUnit, NalUnits};
+pub use h264::{inspect_picture, nal_units, NalUnit, NalUnits, PictureHeaders, Sps};

@@ -9,6 +9,7 @@ pub enum Error {
     InvalidAnnexB,
     EmptyNalUnit,
     InvalidNalHeader,
+    TruncatedSps,
     Encoder(openh264::Error),
     Faulted,
 }
@@ -25,6 +26,7 @@ impl fmt::Display for Error {
             Self::InvalidAnnexB => f.write_str("missing Annex B start prefix"),
             Self::EmptyNalUnit => f.write_str("empty H.264 NAL unit"),
             Self::InvalidNalHeader => f.write_str("H.264 forbidden zero bit is set"),
+            Self::TruncatedSps => f.write_str("missing H.264 SPS profile, constraints or level"),
             Self::Encoder(error) => write!(f, "encoder failed: {}", error),
             Self::Faulted => f.write_str("generator is faulted"),
         }

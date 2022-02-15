@@ -88,6 +88,10 @@ mod tests {
                         .collect::<Result<Vec<_>, _>>()?;
                     assert_eq!(&nal_types[..2], &[7, 8]);
                     assert!(nal_types[2..].contains(&5));
+                    let headers = crate::inspect_picture(&bytes)?;
+                    assert!(headers.sps.is_some());
+                    assert!(headers.pps.is_some());
+                    assert!(headers.has_idr);
                 }
                 EncodeOutcome::Skipped { .. } => panic!("first picture was skipped"),
             }
