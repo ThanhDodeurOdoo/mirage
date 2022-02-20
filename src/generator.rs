@@ -1,5 +1,6 @@
 use crate::encoder::Encoder;
 use crate::frame::YuvFrame;
+use crate::h264::confirm_refresh;
 use crate::pattern::{render_checkerboard, render_moving_rectangle};
 use crate::{timeline, Config, EncodeOutcome, Error, FrameMetadata, Pattern, RawFrame};
 
@@ -9,12 +10,20 @@ enum State {
     Faulted,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Refresh {
+    None,
+    Requested,
+    AwaitingEmission,
+}
+
 pub struct Generator {
     encoder: Encoder,
     frame: YuvFrame,
-    pattern: Pattern,
+    config: Config,
     next_index: u64,
     state: State,
+    refresh: Refresh,
 }
 
 impl Generator {
@@ -22,14 +31,26 @@ impl Generator {
         Ok(Self {
             encoder: Encoder::new(config)?,
             frame: YuvFrame::new(config),
-            pattern: config.pattern(),
+            config,
             next_index: 0,
             state: State::Initial,
+            refresh: Refresh::None,
         })
     }
 
     pub fn generate(&mut self) -> Result<EncodeOutcome, Error> {
         self.generate_with(Encoder::encode)
+    }
+
+    pub fn request_refresh(&mut self) -> Result<(), Error> {
+        if matches!(self.state, State::Faulted) {
+            return Err(Error::Faulted);
+        }
+        timeline::step(self.next_index)?;
+        if self.refresh == Refresh::None {
+            self.refresh = Refresh::Requested;
+        }
+        Ok(())
     }
 
     pub fn raw_frame(&self) -> Option<RawFrame<'_>> {
@@ -47,11 +68,32 @@ impl Generator {
             return Err(Error::Faulted);
         }
         let (metadata, next_index) = timeline::step(self.next_index)?;
-        match self.pattern {
+        if self.refresh == Refresh::Requested {
+            match Encoder::new(self.config) {
+                Ok(encoder) => {
+                    self.encoder = encoder;
+                    self.refresh = Refresh::AwaitingEmission;
+                }
+                Err(error) => {
+                    self.state = State::Faulted;
+                    return Err(error);
+                }
+            }
+        }
+        match self.config.pattern() {
             Pattern::Checkerboard => render_checkerboard(&mut self.frame),
             Pattern::MovingRectangle => render_moving_rectangle(&mut self.frame, self.next_index),
         }
-        match encode(&mut self.encoder, &self.frame, metadata) {
+        let outcome = encode(&mut self.encoder, &self.frame, metadata).and_then(|outcome| {
+            if self.refresh == Refresh::AwaitingEmission {
+                if let EncodeOutcome::Emitted { bytes, .. } = &outcome {
+                    confirm_refresh(bytes)?;
+                    self.refresh = Refresh::None;
+                }
+            }
+            Ok(outcome)
+        });
+        match outcome {
             Ok(outcome) => {
                 self.next_index = next_index;
                 self.state = State::Ready;
@@ -156,6 +198,7 @@ mod tests {
         let pixels = generator.frame.view().y().to_vec();
         for &index in &[1, u64::MAX] {
             generator.next_index = index;
+            assert!(matches!(generator.request_refresh(), Err(Error::Faulted)));
             let result = generator.generate_with(|_, _, _| panic!("encoded after failure"));
             assert!(matches!(result, Err(Error::Faulted)));
             assert!(matches!(generator.generate(), Err(Error::Faulted)));
@@ -169,6 +212,7 @@ mod tests {
     fn exhaustion_preserves_pixels_and_state() -> Result<(), Error> {
         for &completed in &[false, true] {
             let mut generator = Generator::new(Config::default())?;
+            generator.request_refresh()?;
             generator.next_index = if completed { u64::MAX - 1 } else { u64::MAX };
             if completed {
                 let metadata = match generator.generate()? {
@@ -178,15 +222,76 @@ mod tests {
                 assert_eq!(metadata.source_index, u64::MAX - 1);
             }
             let pixels = generator.frame.view().y().to_vec();
+            let refresh = generator.refresh;
             for _ in 0..2 {
+                assert!(matches!(
+                    generator.request_refresh(),
+                    Err(Error::TimelineExhausted)
+                ));
                 let result = generator.generate_with(|_, _, _| panic!("encoded past exhaustion"));
                 assert!(matches!(result, Err(Error::TimelineExhausted)));
                 assert_eq!(generator.next_index, u64::MAX);
                 assert_eq!(generator.frame.view().y(), pixels.as_slice());
                 assert_eq!(generator.raw_frame().is_some(), completed);
                 assert!(!matches!(generator.state, State::Faulted));
+                assert_eq!(generator.refresh, refresh);
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn refresh_waits_through_skips_without_resetting_source() -> Result<(), Error> {
+        let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
+        let mut generator = Generator::new(config)?;
+        generator.generate()?;
+        generator.request_refresh()?;
+        generator.request_refresh()?;
+        generator.generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
+        assert_eq!(generator.refresh, Refresh::AwaitingEmission);
+        generator.request_refresh()?;
+        assert_eq!(generator.refresh, Refresh::AwaitingEmission);
+        match generator.generate()? {
+            EncodeOutcome::Emitted {
+                metadata, bytes, ..
+            } => {
+                assert_eq!(metadata, timeline::step(2)?.0);
+                confirm_refresh(&bytes)?;
+            }
+            EncodeOutcome::Skipped { .. } => panic!("first native picture was skipped"),
+        }
+        assert_eq!(generator.refresh, Refresh::None);
+        let mut expected = YuvFrame::new(config);
+        render_moving_rectangle(&mut expected, 2);
+        assert_eq!(generator.raw_frame().unwrap().y(), expected.view().y());
+        Ok(())
+    }
+
+    #[test]
+    fn unexpected_refresh_output_faults_the_generator() -> Result<(), Error> {
+        let late_pps = [
+            0, 0, 1, 103, 66, 192, 31, 0, 0, 1, 101, 128, 0, 0, 1, 104, 128,
+        ];
+        assert!(matches!(
+            confirm_refresh(&late_pps),
+            Err(Error::UnexpectedRefresh)
+        ));
+        let mut generator = Generator::new(Config::default())?;
+        generator.generate()?;
+        generator.request_refresh()?;
+        let error = generator
+            .generate_with(|_, _, metadata| {
+                Ok(EncodeOutcome::Emitted {
+                    metadata,
+                    bytes: vec![0, 0, 1, 65, 128],
+                    kind: crate::FrameKind::I,
+                })
+            })
+            .unwrap_err();
+        assert!(matches!(error, Error::UnexpectedRefresh));
+        assert!(generator.raw_frame().is_none());
+        assert!(matches!(generator.request_refresh(), Err(Error::Faulted)));
+        assert!(matches!(generator.generate(), Err(Error::Faulted)));
         Ok(())
     }
 }

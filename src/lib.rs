@@ -33,6 +33,15 @@
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
 //! Those timestamps are metadata, not timing embedded in the H.264 bytes.
 //!
+//! [`Generator::request_refresh`] queues an encoder restart at the next step.
+//! Repeated requests coalesce until a picture is emitted. Skips still advance
+//! source time. The restart resets codec references and rate control, while
+//! keeping the source index and pattern. The next emission must have SPS/PPS
+//! before IDR slices or generation fails with [`Error::UnexpectedRefresh`]
+//! or a header error. Like encoder failures, this faults the generator.
+//! Requests on a faulted or exhausted generator return [`Error::Faulted`] or
+//! [`Error::TimelineExhausted`] without changing it.
+//!
 //! Emitted bytes are yours to keep across later calls. [`Generator::raw_frame`]
 //! borrows the latest compact I420 planes: Y at full size, U and V at half width
 //! and height. It returns `None` before the first completed step or after an

@@ -100,6 +100,25 @@ pub fn inspect_picture(bytes: &[u8]) -> Result<PictureHeaders<'_>, Error> {
     Ok(headers)
 }
 
+pub(crate) fn confirm_refresh(bytes: &[u8]) -> Result<(), Error> {
+    let headers = inspect_picture(bytes)?;
+    if !headers.has_idr {
+        return Err(Error::UnexpectedRefresh);
+    }
+    let mut sps = false;
+    let mut pps = false;
+    for nal in nal_units(bytes) {
+        match nal?.nal_type() {
+            7 => sps = true,
+            8 => pps = sps,
+            5 if pps => {}
+            1..=5 => return Err(Error::UnexpectedRefresh),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
