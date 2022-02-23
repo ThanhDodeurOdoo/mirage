@@ -43,14 +43,18 @@ impl Generator {
     }
 
     pub fn request_refresh(&mut self) -> Result<(), Error> {
-        if matches!(self.state, State::Faulted) {
-            return Err(Error::Faulted);
-        }
-        timeline::step(self.next_index)?;
+        self.next_metadata()?;
         if self.refresh == Refresh::None {
             self.refresh = Refresh::Requested;
         }
         Ok(())
+    }
+
+    pub fn next_metadata(&self) -> Result<FrameMetadata, Error> {
+        if matches!(self.state, State::Faulted) {
+            return Err(Error::Faulted);
+        }
+        timeline::step(self.next_index).map(|(metadata, _)| metadata)
     }
 
     pub fn raw_frame(&self) -> Option<RawFrame<'_>> {
@@ -199,6 +203,7 @@ mod tests {
         for &index in &[1, u64::MAX] {
             generator.next_index = index;
             assert!(matches!(generator.request_refresh(), Err(Error::Faulted)));
+            assert!(matches!(generator.next_metadata(), Err(Error::Faulted)));
             let result = generator.generate_with(|_, _, _| panic!("encoded after failure"));
             assert!(matches!(result, Err(Error::Faulted)));
             assert!(matches!(generator.generate(), Err(Error::Faulted)));
@@ -225,6 +230,10 @@ mod tests {
             let refresh = generator.refresh;
             for _ in 0..2 {
                 assert!(matches!(
+                    generator.next_metadata(),
+                    Err(Error::TimelineExhausted)
+                ));
+                assert!(matches!(
                     generator.request_refresh(),
                     Err(Error::TimelineExhausted)
                 ));
@@ -244,12 +253,21 @@ mod tests {
     fn refresh_waits_through_skips_without_resetting_source() -> Result<(), Error> {
         let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
         let mut generator = Generator::new(config)?;
+        assert_eq!(generator.next_metadata()?, timeline::step(0)?.0);
+        assert!(generator.raw_frame().is_none());
         generator.generate()?;
         generator.request_refresh()?;
         generator.request_refresh()?;
+        let pixels = generator.raw_frame().unwrap().y().to_vec();
+        for _ in 0..2 {
+            assert_eq!(generator.next_metadata()?, timeline::step(1)?.0);
+            assert_eq!(generator.refresh, Refresh::Requested);
+            assert_eq!(generator.raw_frame().unwrap().y(), pixels.as_slice());
+        }
         generator.generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
         assert_eq!(generator.refresh, Refresh::AwaitingEmission);
         generator.request_refresh()?;
+        assert_eq!(generator.next_metadata()?, timeline::step(2)?.0);
         assert_eq!(generator.refresh, Refresh::AwaitingEmission);
         match generator.generate()? {
             EncodeOutcome::Emitted {
@@ -291,6 +309,7 @@ mod tests {
         assert!(matches!(error, Error::UnexpectedRefresh));
         assert!(generator.raw_frame().is_none());
         assert!(matches!(generator.request_refresh(), Err(Error::Faulted)));
+        assert!(matches!(generator.next_metadata(), Err(Error::Faulted)));
         assert!(matches!(generator.generate(), Err(Error::Faulted)));
         Ok(())
     }

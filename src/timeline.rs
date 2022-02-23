@@ -1,5 +1,14 @@
 use crate::{Error, FrameMetadata, FRAMES_PER_SECOND};
+use std::convert::TryFrom;
 use std::time::Duration;
+
+pub fn clock_ticks(source_index: u64, clock_rate: u32) -> Result<u64, Error> {
+    if clock_rate == 0 {
+        return Err(Error::InvalidClockRate);
+    }
+    let ticks = u128::from(source_index) * u128::from(clock_rate) / u128::from(FRAMES_PER_SECOND);
+    u64::try_from(ticks).map_err(|_| Error::ClockOverflow)
+}
 
 pub(crate) fn step(source_index: u64) -> Result<(FrameMetadata, u64), Error> {
     let next_index = source_index
@@ -61,5 +70,20 @@ mod tests {
         );
         assert_eq!(next, u64::MAX);
         assert!(matches!(step(next), Err(Error::TimelineExhausted)));
+    }
+
+    #[test]
+    fn clock_ticks_round_once_and_reject_overflow() -> Result<(), Error> {
+        assert_eq!(clock_ticks(1, 90_000)?, 1_500);
+        assert_eq!(clock_ticks(600, 90_000)?, 900_000);
+        assert_eq!(clock_ticks(1, 1_000)?, 16);
+        assert_eq!(clock_ticks(3, 1_000)?, 50);
+        assert_eq!(clock_ticks(u64::MAX, 60)?, u64::MAX);
+        assert!(matches!(clock_ticks(1, 0), Err(Error::InvalidClockRate)));
+        assert!(matches!(
+            clock_ticks(u64::MAX, 61),
+            Err(Error::ClockOverflow)
+        ));
+        Ok(())
     }
 }

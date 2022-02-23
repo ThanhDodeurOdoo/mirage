@@ -7,7 +7,7 @@
 //! # use like that
 //!
 //! ```rust
-//! use mirage::{Config, EncodeOutcome, Generator, Pattern};
+//! use mirage::{clock_ticks, Config, EncodeOutcome, Generator, Pattern};
 //! let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
 //! let mut video = Generator::new(config)?;
 //! for _ in 0..60 {
@@ -22,6 +22,9 @@
 //! }
 //! let pixels = video.raw_frame().unwrap();
 //! assert_eq!(pixels.y().len(), 320 * 240);
+//! let next = video.next_metadata()?;
+//! assert_eq!(next.source_index, 60);
+//! assert_eq!(clock_ticks(next.source_index, 90_000)?, 90_000);
 //! # Ok::<(), mirage::Error>(())
 //! ```
 //!
@@ -32,6 +35,12 @@
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
 //! Those timestamps are metadata, not timing embedded in the H.264 bytes.
+//! [`Generator::next_metadata`] previews the next step without advancing or
+//! changing pixels. It returns [`Error::Faulted`] or [`Error::TimelineExhausted`]
+//! when generation cannot continue. Late calls never skip source steps.
+//! [`clock_ticks`] maps an index directly to a positive integer rate in Hz,
+//! rounding down once. Zero returns [`Error::InvalidClockRate`] and a result
+//! beyond `u64` returns [`Error::ClockOverflow`]. Epochs and wrapping are yours.
 //!
 //! [`Generator::request_refresh`] queues an encoder restart at the next step.
 //! Repeated requests coalesce until a picture is emitted. Skips still advance
@@ -82,3 +91,4 @@ pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
 pub use generator::Generator;
 pub use h264::{inspect_picture, nal_units, NalUnit, NalUnits, PictureHeaders, Sps};
+pub use timeline::clock_ticks;
