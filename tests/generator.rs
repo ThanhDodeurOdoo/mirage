@@ -97,3 +97,24 @@ fn emitted_output_survives_later_steps_and_generator_drop() -> Result<(), Error>
     }
     Ok(())
 }
+
+#[test]
+fn texture_changes_only_when_requested() -> Result<(), Error> {
+    for &changing in &[false, true] {
+        let config = Config::new(18, 18, 1_000_000, Pattern::Texture { seed: 42, changing })?;
+        let mut first = Generator::new(config)?;
+        let mut second = Generator::new(config)?;
+        first.generate()?;
+        let start = first.raw_frame().unwrap().y().to_vec();
+        first.generate()?;
+        second.generate()?;
+        assert_eq!(second.raw_frame().unwrap().y(), start.as_slice());
+        assert_eq!(first.raw_frame().unwrap().y() != start.as_slice(), changing);
+        second.generate()?;
+        assert_eq!(
+            first.raw_frame().unwrap().y(),
+            second.raw_frame().unwrap().y()
+        );
+    }
+    Ok(())
+}

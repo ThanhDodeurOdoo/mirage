@@ -1,7 +1,8 @@
 //! Small test pictures, real H.264. No camera needed.
 //!
-//! Pick a [`Pattern::Checkerboard`] or a [`Pattern::MovingRectangle`] with a
-//! little frame counter. [`Generator`] draws grayscale I420 pixels and encodes
+//! Pick a [`Pattern::Checkerboard`], a [`Pattern::MovingRectangle`] with a
+//! little frame counter or seeded [`Pattern::Texture`] noise.
+//! [`Generator`] draws grayscale I420 pixels and encodes
 //! them with OpenH264. You handle pacing, files and networking.
 //!
 //! # use like that
@@ -31,6 +32,10 @@
 //! [`Config::default`] selects a 320 x 240 checkerboard with a 1 Mbps target.
 //! Custom dimensions must be even, from 16 x 16 through 1920 x 1080. Bitrate
 //! is a target in bits per second, from 1 through `i32::MAX`.
+//! `Pattern::Texture { seed: 42, changing: false }` keeps the same grainy picture.
+//! Set `changing: true` for fresh noise at each source index. A fixed wrapping
+//! `u64` hash produces repeatable luma in 16..=235 with neutral chroma. These
+//! pixel guarantees do not fix encoded bytes, bitrate or skips.
 //!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.

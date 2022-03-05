@@ -1,7 +1,7 @@
 use crate::encoder::Encoder;
 use crate::frame::YuvFrame;
 use crate::h264::confirm_refresh;
-use crate::pattern::{render_checkerboard, render_moving_rectangle};
+use crate::pattern::{render_checkerboard, render_moving_rectangle, render_texture};
 use crate::{timeline, Config, EncodeOutcome, Error, FrameMetadata, Pattern, RawFrame};
 
 enum State {
@@ -87,6 +87,13 @@ impl Generator {
         match self.config.pattern() {
             Pattern::Checkerboard => render_checkerboard(&mut self.frame),
             Pattern::MovingRectangle => render_moving_rectangle(&mut self.frame, self.next_index),
+            Pattern::Texture { seed, changing } => {
+                render_texture(
+                    &mut self.frame,
+                    seed,
+                    if changing { self.next_index } else { 0 },
+                );
+            }
         }
         let outcome = encode(&mut self.encoder, &self.frame, metadata).and_then(|outcome| {
             if self.refresh == Refresh::AwaitingEmission {

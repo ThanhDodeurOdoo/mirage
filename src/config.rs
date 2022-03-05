@@ -10,6 +10,7 @@ pub const FRAMES_PER_SECOND: u32 = 60;
 pub enum Pattern {
     Checkerboard,
     MovingRectangle,
+    Texture { seed: u64, changing: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

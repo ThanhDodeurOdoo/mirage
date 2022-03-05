@@ -5,6 +5,20 @@ const WHITE: u8 = 235;
 const MOTION_PERIOD: u64 = 240;
 const COUNTER_BITS: usize = 8;
 
+pub(crate) fn render_texture(frame: &mut YuvFrame, seed: u64, source_index: u64) {
+    let width = frame.view().width() as usize;
+    let seed = seed ^ source_index.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    for (y, row) in frame.y_mut().chunks_mut(width).enumerate() {
+        for (x, pixel) in row.iter_mut().enumerate() {
+            let mut value = seed ^ ((y as u64) << 32) ^ x as u64;
+            value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            value ^= value >> 31;
+            *pixel = BLACK + (value % u64::from(WHITE - BLACK + 1)) as u8;
+        }
+    }
+}
+
 pub(crate) fn render_checkerboard(frame: &mut YuvFrame) {
     let width = frame.view().width() as usize;
     for (y, row) in frame.y_mut().chunks_mut(width).enumerate() {
@@ -51,6 +65,24 @@ pub(crate) fn render_moving_rectangle(frame: &mut YuvFrame, source_index: u64) {
 mod tests {
     use super::*;
     use crate::{Config, Pattern};
+
+    #[test]
+    fn texture_redraws_from_seed_and_index() {
+        let mut frame = YuvFrame::new(Config::default());
+        render_texture(&mut frame, 42, 0);
+        let expected = frame.view().y().to_vec();
+        let address = frame.view().y().as_ptr();
+        render_texture(&mut frame, 43, 0);
+        assert_ne!(frame.view().y(), expected.as_slice());
+        render_texture(&mut frame, 42, u64::MAX);
+        assert_ne!(frame.view().y(), expected.as_slice());
+        render_texture(&mut frame, 42, 0);
+        let raw = frame.view();
+        assert_eq!(raw.y(), expected.as_slice());
+        assert_eq!(raw.y().as_ptr(), address);
+        assert!(raw.y().iter().all(|&value| (16..=235).contains(&value)));
+        assert!(raw.u().iter().chain(raw.v()).all(|&value| value == 128));
+    }
 
     #[test]
     fn renders_four_cells_at_minimum_size() {
