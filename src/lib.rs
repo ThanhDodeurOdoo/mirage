@@ -36,6 +36,10 @@
 //! Set `changing: true` for fresh noise at each source index. A fixed wrapping
 //! `u64` hash produces repeatable luma in 16..=235 with neutral chroma. These
 //! pixel guarantees do not fix encoded bytes, bitrate or skips.
+//! [`Generator::with_scenes`] takes a `Vec<(u64, Pattern)>` of scene starts,
+//! replacing the configured pattern. Empty lists, a nonzero first start or
+//! non-increasing starts return [`Error::InvalidScenes`]. The last scene continues.
+//! Cuts use global source indices, including skips, and do not request refresh.
 //!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.

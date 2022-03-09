@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Error {
     InvalidDimensions { width: u32, height: u32 },
     InvalidBitrate(u32),
+    InvalidScenes,
     FrameSizeOverflow,
     TimelineExhausted,
     InvalidClockRate,
@@ -24,6 +25,7 @@ impl fmt::Display for Error {
                 write!(f, "unsupported dimensions: {}x{}", width, height)
             }
             Self::InvalidBitrate(bitrate) => write!(f, "unsupported bitrate: {} bps", bitrate),
+            Self::InvalidScenes => f.write_str("scenes must start at zero and increase strictly"),
             Self::FrameSizeOverflow => f.write_str("frame size overflow"),
             Self::TimelineExhausted => f.write_str("timeline exhausted"),
             Self::InvalidClockRate => f.write_str("clock rate must be positive"),

@@ -21,6 +21,7 @@ pub struct Generator {
     encoder: Encoder,
     frame: YuvFrame,
     config: Config,
+    scenes: Vec<(u64, Pattern)>,
     next_index: u64,
     state: State,
     refresh: Refresh,
@@ -32,6 +33,7 @@ impl Generator {
             encoder: Encoder::new(config)?,
             frame: YuvFrame::new(config),
             config,
+            scenes: Vec::new(),
             next_index: 0,
             state: State::Initial,
             refresh: Refresh::None,
@@ -40,6 +42,17 @@ impl Generator {
 
     pub fn generate(&mut self) -> Result<EncodeOutcome, Error> {
         self.generate_with(Encoder::encode)
+    }
+
+    pub fn with_scenes(config: Config, scenes: Vec<(u64, Pattern)>) -> Result<Self, Error> {
+        if scenes.first().map(|scene| scene.0) != Some(0)
+            || scenes.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+        {
+            return Err(Error::InvalidScenes);
+        }
+        let mut generator = Self::new(config)?;
+        generator.scenes = scenes;
+        Ok(generator)
     }
 
     pub fn request_refresh(&mut self) -> Result<(), Error> {
@@ -84,7 +97,14 @@ impl Generator {
                 }
             }
         }
-        match self.config.pattern() {
+        let pattern = self
+            .scenes
+            .iter()
+            .rev()
+            .find(|scene| scene.0 <= self.next_index)
+            .map(|scene| scene.1)
+            .unwrap_or(self.config.pattern());
+        match pattern {
             Pattern::Checkerboard => render_checkerboard(&mut self.frame),
             Pattern::MovingRectangle => render_moving_rectangle(&mut self.frame, self.next_index),
             Pattern::Texture { seed, changing } => {
@@ -123,6 +143,51 @@ mod tests {
     use super::*;
     use std::error::Error as _;
     use std::time::Duration;
+
+    #[test]
+    fn scenes_follow_source_steps_through_skips() -> Result<(), Error> {
+        let config = Config::default();
+        let mut generator = Generator::with_scenes(
+            config,
+            vec![
+                (0, Pattern::Checkerboard),
+                (
+                    1,
+                    Pattern::Texture {
+                        seed: 7,
+                        changing: true,
+                    },
+                ),
+                (2, Pattern::MovingRectangle),
+            ],
+        )?;
+        generator.generate()?;
+        generator.generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
+        let mut expected = YuvFrame::new(config);
+        render_texture(&mut expected, 7, 1);
+        assert_eq!(generator.raw_frame().unwrap().y(), expected.view().y());
+        for index in 2..4 {
+            generator.generate()?;
+            render_moving_rectangle(&mut expected, index);
+            assert_eq!(generator.raw_frame().unwrap().y(), expected.view().y());
+            assert_eq!(generator.refresh, Refresh::None);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_scene_boundaries() {
+        for starts in [vec![], vec![1], vec![0, 0], vec![0, 3, 2]] {
+            let scenes = starts
+                .into_iter()
+                .map(|index| (index, Pattern::Checkerboard))
+                .collect();
+            assert!(matches!(
+                Generator::with_scenes(Config::default(), scenes),
+                Err(Error::InvalidScenes)
+            ));
+        }
+    }
 
     #[test]
     fn skipped_steps_advance_and_expose_pixels() -> Result<(), Error> {
