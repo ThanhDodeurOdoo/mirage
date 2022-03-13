@@ -1,6 +1,7 @@
 use crate::encoder::Encoder;
 use crate::frame::YuvFrame;
 use crate::h264::confirm_refresh;
+use crate::identity::render_identity;
 use crate::pattern::{render_checkerboard, render_moving_rectangle, render_texture};
 use crate::{timeline, Config, EncodeOutcome, Error, FrameMetadata, Pattern, RawFrame};
 
@@ -115,6 +116,9 @@ impl Generator {
                 );
             }
         }
+        if let Some(source_id) = self.config.identity_source() {
+            render_identity(&mut self.frame, source_id, self.next_index);
+        }
         let outcome = encode(&mut self.encoder, &self.frame, metadata).and_then(|outcome| {
             if self.refresh == Refresh::AwaitingEmission {
                 if let EncodeOutcome::Emitted { bytes, .. } = &outcome {
@@ -172,6 +176,26 @@ mod tests {
             assert_eq!(generator.raw_frame().unwrap().y(), expected.view().y());
             assert_eq!(generator.refresh, Refresh::None);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn identity_survives_scenes_skips_and_refresh() -> Result<(), Error> {
+        let config = Config::default().with_identity(u32::MAX)?;
+        let mut generator = Generator::with_scenes(
+            config,
+            vec![(0, Pattern::Checkerboard), (256, Pattern::MovingRectangle)],
+        )?;
+        generator.next_index = 255;
+        generator.generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
+        assert_eq!(generator.raw_frame().unwrap().y()[40 * 320 + 16], 235);
+        generator.request_refresh()?;
+        generator.generate()?;
+        let mut expected = YuvFrame::new(config);
+        render_moving_rectangle(&mut expected, 256);
+        render_identity(&mut expected, u32::MAX, 256);
+        assert_eq!(generator.raw_frame().unwrap().y(), expected.view().y());
+        assert_eq!(generator.raw_frame().unwrap().y()[40 * 320 + 16], 16);
         Ok(())
     }
 

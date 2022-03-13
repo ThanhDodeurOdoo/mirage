@@ -19,6 +19,7 @@ pub struct Config {
     height: u32,
     bitrate_bps: u32,
     pattern: Pattern,
+    identity_source: Option<u32>,
 }
 
 impl Config {
@@ -44,11 +45,26 @@ impl Config {
             height,
             bitrate_bps,
             pattern,
+            identity_source: None,
         })
     }
 
     pub fn width(&self) -> u32 {
         self.width
+    }
+
+    pub fn with_identity(mut self, source_id: u32) -> Result<Self, Error> {
+        if (self.width as usize) < crate::identity::MIN_WIDTH
+            || (self.height as usize) < crate::identity::MIN_HEIGHT
+        {
+            return Err(Error::IdentityCardTooSmall);
+        }
+        self.identity_source = Some(source_id);
+        Ok(self)
+    }
+
+    pub fn identity_source(&self) -> Option<u32> {
+        self.identity_source
     }
 
     pub fn height(&self) -> u32 {
@@ -71,6 +87,7 @@ impl Default for Config {
             height: 240,
             bitrate_bps: 1_000_000,
             pattern: Pattern::Checkerboard,
+            identity_source: None,
         }
     }
 }

@@ -1,7 +1,6 @@
-use crate::frame::{YuvFrame, BLACK};
+use crate::frame::{YuvFrame, BLACK, WHITE};
 
 const CELL_SIZE: usize = 8;
-const WHITE: u8 = 235;
 const MOTION_PERIOD: u64 = 240;
 const COUNTER_BITS: usize = 8;
 

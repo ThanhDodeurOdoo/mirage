@@ -40,6 +40,12 @@
 //! replacing the configured pattern. Empty lists, a nonzero first start or
 //! non-increasing starts return [`Error::InvalidScenes`]. The last scene continues.
 //! Cuts use global source indices, including skips, and do not request refresh.
+//! Opt in with `config.with_identity(source_id)?` for a card carrying the full
+//! `u32` source ID and `u64` frame index. It overlays every scene, including skips.
+//! The fixed 8-pixel cells need at least 152 x 88 pixels or configuration returns
+//! [`Error::IdentityCardTooSmall`]. References and a 16-bit checksum help detect
+//! damage, but promise neither authentication nor recovery after scaling or at
+//! every bitrate. Cards are disabled by default.
 //!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
@@ -92,6 +98,7 @@ mod error;
 mod frame;
 mod generator;
 mod h264;
+mod identity;
 mod pattern;
 mod timeline;
 

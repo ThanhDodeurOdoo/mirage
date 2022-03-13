@@ -34,6 +34,7 @@ impl<'a> RawFrame<'a> {
 }
 
 pub(crate) const BLACK: u8 = 16;
+pub(crate) const WHITE: u8 = 235;
 const NEUTRAL_CHROMA: u8 = 128;
 
 pub(crate) struct YuvFrame {
