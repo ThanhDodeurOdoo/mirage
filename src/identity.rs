@@ -1,4 +1,6 @@
 use crate::frame::{YuvFrame, BLACK, WHITE};
+use crate::Error;
+use std::convert::TryInto;
 
 const ORIGIN: usize = 16;
 const CELL: usize = 8;
@@ -6,6 +8,56 @@ const COLUMNS: usize = 16;
 const ROWS: usize = 8;
 pub(crate) const MIN_WIDTH: usize = ORIGIN + (COLUMNS + 1) * CELL;
 pub(crate) const MIN_HEIGHT: usize = ORIGIN + (ROWS + 1) * CELL;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameIdentity {
+    pub source_id: u32,
+    pub source_index: u64,
+}
+
+pub fn read_identity(
+    luma: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+) -> Result<Option<FrameIdentity>, Error> {
+    let length = height
+        .checked_sub(1)
+        .and_then(|rows| rows.checked_mul(stride))
+        .and_then(|length| length.checked_add(width))
+        .ok_or(Error::InvalidLumaLayout)?;
+    if width == 0 || stride < width || luma.len() < length {
+        return Err(Error::InvalidLumaLayout);
+    }
+    if width < MIN_WIDTH || height < MIN_HEIGHT {
+        return Ok(None);
+    }
+    let mut bytes = [0u8; 16];
+    for bit in 0..bytes.len() * 8 {
+        let x = ORIGIN + (bit % COLUMNS) * CELL;
+        let y = ORIGIN + (bit / COLUMNS) * CELL;
+        let mut sum = 0u32;
+        for row in y + 2..y + 6 {
+            for &pixel in &luma[row * stride + x + 2..row * stride + x + 6] {
+                sum += u32::from(pixel);
+            }
+        }
+        match sum / 16 {
+            0..=80 => {}
+            180..=255 => bytes[bit / 8] |= 1 << (bit % 8),
+            _ => return Ok(None),
+        }
+    }
+    if bytes[..2] != [0x55, 0xd3]
+        || checksum(&bytes[..14]) != u16::from_le_bytes([bytes[14], bytes[15]])
+    {
+        return Ok(None);
+    }
+    Ok(Some(FrameIdentity {
+        source_id: u32::from_le_bytes(bytes[2..6].try_into().unwrap()),
+        source_index: u64::from_le_bytes(bytes[6..14].try_into().unwrap()),
+    }))
+}
 
 pub(crate) fn render_identity(frame: &mut YuvFrame, source_id: u32, source_index: u64) {
     let mut bytes = [0; 16];
@@ -80,5 +132,47 @@ mod tests {
             Err(Error::IdentityCardTooSmall)
         ));
         Ok(())
+    }
+
+    #[test]
+    fn reads_compact_and_padded_cards_and_rejects_damage() -> Result<(), Error> {
+        let mut frame = YuvFrame::new(Config::default());
+        for &index in &[255, 256, u64::MAX] {
+            render_identity(&mut frame, 0x8000_0001, index);
+            let expected = Some(FrameIdentity {
+                source_id: 0x8000_0001,
+                source_index: index,
+            });
+            assert_eq!(read_identity(frame.view().y(), 320, 240, 320)?, expected);
+            let mut padded = vec![0; 239 * 336 + 320];
+            for (source, dest) in frame.view().y().chunks(320).zip(padded.chunks_mut(336)) {
+                dest[..320].copy_from_slice(source);
+            }
+            assert_eq!(read_identity(&padded, 320, 240, 336)?, expected);
+        }
+        for row in frame.y_mut().chunks_mut(320).skip(24).take(8) {
+            row[16..24].fill(BLACK);
+        }
+        assert_eq!(read_identity(frame.view().y(), 320, 240, 320)?, None);
+        frame.y_mut().fill(128);
+        assert_eq!(read_identity(frame.view().y(), 320, 240, 320)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_luma_layouts_before_sampling() {
+        for &(width, height, stride, length) in &[
+            (0, 1, 1, 1),
+            (320, 0, 320, 0),
+            (320, 240, 319, 0),
+            (320, 240, 320, 100),
+            (320, usize::MAX, usize::MAX, 0),
+        ] {
+            assert!(matches!(
+                read_identity(&vec![0; length], width, height, stride),
+                Err(Error::InvalidLumaLayout)
+            ));
+        }
+        assert_eq!(read_identity(&[0; 16 * 16], 16, 16, 16).unwrap(), None);
     }
 }

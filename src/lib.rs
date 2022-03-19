@@ -8,8 +8,8 @@
 //! # use like that
 //!
 //! ```rust
-//! use mirage::{clock_ticks, Config, EncodeOutcome, Generator, Pattern};
-//! let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?;
+//! use mirage::{clock_ticks, read_identity, Config, EncodeOutcome, Generator, Pattern};
+//! let config = Config::new(320, 240, 1_000_000, Pattern::MovingRectangle)?.with_identity(42)?;
 //! let mut video = Generator::new(config)?;
 //! for _ in 0..60 {
 //!     match video.generate()? {
@@ -23,6 +23,8 @@
 //! }
 //! let pixels = video.raw_frame().unwrap();
 //! assert_eq!(pixels.y().len(), 320 * 240);
+//! let identity = read_identity(pixels.y(), 320, 240, 320)?.unwrap();
+//! assert_eq!((identity.source_id, identity.source_index), (42, 59));
 //! let next = video.next_metadata()?;
 //! assert_eq!(next.source_index, 60);
 //! assert_eq!(clock_ticks(next.source_index, 90_000)?, 90_000);
@@ -46,6 +48,11 @@
 //! [`Error::IdentityCardTooSmall`]. References and a 16-bit checksum help detect
 //! damage, but promise neither authentication nor recovery after scaling or at
 //! every bitrate. Cards are disabled by default.
+//! [`read_identity`] accepts borrowed luma, width, height and row stride.
+//! Invalid dimensions, stride, length or arithmetic return [`Error::InvalidLumaLayout`].
+//! A valid picture too small for the card, ambiguous contrast or failed checks
+//! returns `None`. It samples unscaled cell centers and returns a copied identity.
+//! A readable card says nothing about damage elsewhere in the picture.
 //!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
@@ -107,4 +114,5 @@ pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
 pub use generator::Generator;
 pub use h264::{inspect_picture, nal_units, NalUnit, NalUnits, PictureHeaders, Sps};
+pub use identity::{read_identity, FrameIdentity};
 pub use timeline::clock_ticks;
