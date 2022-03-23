@@ -7,6 +7,8 @@ pub enum Error {
     InvalidScenes,
     IdentityCardTooSmall,
     InvalidLumaLayout,
+    InvalidExpectedFrames,
+    InvalidObservationTimes,
     FrameSizeOverflow,
     TimelineExhausted,
     InvalidClockRate,
@@ -32,6 +34,10 @@ impl fmt::Display for Error {
             Self::InvalidLumaLayout => {
                 f.write_str("invalid luma dimensions, stride or buffer length")
             }
+            Self::InvalidExpectedFrames => {
+                f.write_str("expected source indices must increase strictly")
+            }
+            Self::InvalidObservationTimes => f.write_str("observation times must not decrease"),
             Self::FrameSizeOverflow => f.write_str("frame size overflow"),
             Self::TimelineExhausted => f.write_str("timeline exhausted"),
             Self::InvalidClockRate => f.write_str("clock rate must be positive"),

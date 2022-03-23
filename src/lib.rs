@@ -54,6 +54,17 @@
 //! returns `None`. It samples unscaled cell centers and returns a copied identity.
 //! A readable card says nothing about damage elsewhere in the picture.
 //!
+//! [`compare_frames`] compares one source's expected outcomes with timed
+//! [`Observation`] records. Supply only outcomes produced by the cutoff.
+//! Expected indices must increase strictly ([`Error::InvalidExpectedFrames`])
+//! and observation times must not decrease ([`Error::InvalidObservationTimes`]).
+//! Times and cutoff share a caller epoch, separate from nominal source times.
+//! First emitted matches count once, repeats count separately and new matches
+//! below the highest matched index also count as reordered. Wrong sources,
+//! unknown or skipped indices and unreadable cards never count as matches.
+//! Observations after the inclusive cutoff count only as `after_cutoff`.
+//! Unobserved emissions are not proven packet loss, nor repeats duplicate RTP.
+//!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
 //! Those timestamps are metadata, not timing embedded in the H.264 bytes.
@@ -99,6 +110,7 @@
 
 #![forbid(unsafe_code)]
 
+mod compare;
 mod config;
 mod encoder;
 mod error;
@@ -109,6 +121,7 @@ mod identity;
 mod pattern;
 mod timeline;
 
+pub use compare::{compare_frames, Comparison, Observation};
 pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
