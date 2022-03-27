@@ -7,6 +7,12 @@ pub struct Observation {
     pub identity: Option<FrameIdentity>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct RefreshRequest {
+    pub time: Duration,
+    pub confirmed_index: u64,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Comparison {
     pub matched: usize,
@@ -17,6 +23,7 @@ pub struct Comparison {
     pub unreadable: usize,
     pub unobserved: usize,
     pub after_cutoff: usize,
+    pub recovery: Option<Duration>,
 }
 
 pub fn compare_frames(
@@ -24,6 +31,7 @@ pub fn compare_frames(
     expected: &[EncodeOutcome],
     observations: &[Observation],
     cutoff: Duration,
+    refresh: Option<RefreshRequest>,
 ) -> Result<Comparison, Error> {
     if expected
         .windows(2)
@@ -36,6 +44,13 @@ pub fn compare_frames(
         .any(|pair| pair[0].time > pair[1].time)
     {
         return Err(Error::InvalidObservationTimes);
+    }
+    if let Some(refresh) = refresh {
+        if refresh.time > cutoff || !expected.iter().any(|outcome| {
+            matches!(outcome, EncodeOutcome::Emitted { metadata, .. } if metadata.source_index == refresh.confirmed_index)
+        }) {
+            return Err(Error::InvalidRefreshRequest);
+        }
     }
     let mut report = Comparison {
         unobserved: expected
@@ -69,6 +84,14 @@ pub fn compare_frames(
                 continue;
             }
         };
+        if let Some(refresh) = refresh {
+            if report.recovery.is_none()
+                && identity.source_index >= refresh.confirmed_index
+                && observation.time >= refresh.time
+            {
+                report.recovery = Some(observation.time - refresh.time);
+            }
+        }
         if seen[position] {
             report.repeats += 1;
         } else {
@@ -140,7 +163,7 @@ mod tests {
             observed(Some(4), 9),
         ];
         assert_eq!(
-            compare_frames(7, &expected, &observations, Duration::from_millis(8))?,
+            compare_frames(7, &expected, &observations, Duration::from_millis(8), None)?,
             Comparison {
                 matched: 3,
                 repeats: 1,
@@ -150,6 +173,7 @@ mod tests {
                 unreadable: 1,
                 unobserved: 1,
                 after_cutoff: 1,
+                recovery: None,
             }
         );
         Ok(())
@@ -159,12 +183,84 @@ mod tests {
     fn rejects_ambiguous_record_order() {
         let cutoff = Duration::from_secs(1);
         assert!(matches!(
-            compare_frames(7, &[outcome(2, true), outcome(2, false)], &[], cutoff),
+            compare_frames(7, &[outcome(2, true), outcome(2, false)], &[], cutoff, None),
             Err(Error::InvalidExpectedFrames)
         ));
         assert!(matches!(
-            compare_frames(7, &[], &[observed(None, 2), observed(None, 1)], cutoff),
+            compare_frames(
+                7,
+                &[],
+                &[observed(None, 2), observed(None, 1)],
+                cutoff,
+                None
+            ),
             Err(Error::InvalidObservationTimes)
         ));
+        for refresh in [
+            RefreshRequest {
+                time: cutoff,
+                confirmed_index: 1,
+            },
+            RefreshRequest {
+                time: cutoff + Duration::from_secs(1),
+                confirmed_index: 0,
+            },
+        ] {
+            assert!(matches!(
+                compare_frames(
+                    7,
+                    &[outcome(0, true), outcome(1, false)],
+                    &[],
+                    cutoff,
+                    Some(refresh)
+                ),
+                Err(Error::InvalidRefreshRequest)
+            ));
+        }
+    }
+
+    #[test]
+    fn recovery_uses_only_matching_media_after_the_request() -> Result<(), Error> {
+        let expected: Vec<_> = (4..8).map(|index| outcome(index, index != 5)).collect();
+        let refresh = Some(RefreshRequest {
+            time: Duration::from_millis(10),
+            confirmed_index: 6,
+        });
+        let observations = [
+            observed(Some(7), 9),
+            observed(Some(4), 10),
+            observed(Some(5), 11),
+            observed(Some(7), 12),
+            observed(Some(6), 15),
+        ];
+        let unrecovered = compare_frames(
+            7,
+            &expected,
+            &observations,
+            Duration::from_millis(11),
+            refresh,
+        )?;
+        assert_eq!(unrecovered.recovery, None);
+        let recovered = compare_frames(
+            7,
+            &expected,
+            &observations,
+            Duration::from_millis(15),
+            refresh,
+        )?;
+        assert_eq!(recovered.recovery, Some(Duration::from_millis(2)));
+        assert_eq!(recovered.repeats, 1);
+        assert_eq!(
+            compare_frames(
+                7,
+                &expected,
+                &[observed(Some(6), 10)],
+                Duration::from_millis(10),
+                refresh
+            )?
+            .recovery,
+            Some(Duration::from_secs(0))
+        );
+        Ok(())
     }
 }

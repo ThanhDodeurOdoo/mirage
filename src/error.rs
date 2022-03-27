@@ -9,6 +9,7 @@ pub enum Error {
     InvalidLumaLayout,
     InvalidExpectedFrames,
     InvalidObservationTimes,
+    InvalidRefreshRequest,
     FrameSizeOverflow,
     TimelineExhausted,
     InvalidClockRate,
@@ -38,6 +39,9 @@ impl fmt::Display for Error {
                 f.write_str("expected source indices must increase strictly")
             }
             Self::InvalidObservationTimes => f.write_str("observation times must not decrease"),
+            Self::InvalidRefreshRequest => {
+                f.write_str("refresh time exceeds cutoff or confirmed index was not emitted")
+            }
             Self::FrameSizeOverflow => f.write_str("frame size overflow"),
             Self::TimelineExhausted => f.write_str("timeline exhausted"),
             Self::InvalidClockRate => f.write_str("clock rate must be positive"),

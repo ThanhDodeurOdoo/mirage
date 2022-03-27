@@ -58,12 +58,18 @@
 //! [`Observation`] records. Supply only outcomes produced by the cutoff.
 //! Expected indices must increase strictly ([`Error::InvalidExpectedFrames`])
 //! and observation times must not decrease ([`Error::InvalidObservationTimes`]).
-//! Times and cutoff share a caller epoch, separate from nominal source times.
+//! Times and cutoff share a caller monotonic epoch, separate from source times.
 //! First emitted matches count once, repeats count separately and new matches
 //! below the highest matched index also count as reordered. Wrong sources,
 //! unknown or skipped indices and unreadable cards never count as matches.
 //! Observations after the inclusive cutoff count only as `after_cutoff`.
 //! Unobserved emissions are not proven packet loss, nor repeats duplicate RTP.
+//! Pass `None` for refresh, or a [`RefreshRequest`] with its caller time and
+//! confirmed refresh index. `recovery` is the time to the first matching emission
+//! at or beyond that index observed between request and cutoff, including repeats.
+//! Older pictures cannot satisfy it. `None` means no request or no recovery yet.
+//! A request after cutoff or an index absent from expected emissions returns
+//! [`Error::InvalidRefreshRequest`]. Refresh confirmation belongs to the caller.
 //!
 //! Each completed call advances the source index, including skips. Indices start
 //! at zero and timestamps follow 60 Hz, whatever speed you call `generate`.
@@ -121,7 +127,7 @@ mod identity;
 mod pattern;
 mod timeline;
 
-pub use compare::{compare_frames, Comparison, Observation};
+pub use compare::{compare_frames, Comparison, Observation, RefreshRequest};
 pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
