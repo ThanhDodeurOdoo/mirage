@@ -1,6 +1,5 @@
 use crate::frame::{YuvFrame, BLACK, WHITE};
 use crate::Error;
-use std::convert::TryInto;
 
 const ORIGIN: usize = 16;
 const CELL: usize = 8;
@@ -15,6 +14,11 @@ pub struct FrameIdentity {
     pub source_index: u64,
 }
 
+/// Unscaled luma only. `None` means too small, low contrast or failed card checks.
+///
+/// # Errors
+///
+/// [`Error::InvalidLumaLayout`] for invalid dimensions, stride, buffer length or overflow.
 pub fn read_identity(
     luma: &[u8],
     width: usize,
@@ -54,8 +58,10 @@ pub fn read_identity(
         return Ok(None);
     }
     Ok(Some(FrameIdentity {
-        source_id: u32::from_le_bytes(bytes[2..6].try_into().unwrap()),
-        source_index: u64::from_le_bytes(bytes[6..14].try_into().unwrap()),
+        source_id: u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]),
+        source_index: u64::from_le_bytes([
+            bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+        ]),
     }))
 }
 

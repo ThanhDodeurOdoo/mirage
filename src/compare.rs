@@ -10,6 +10,7 @@ pub struct Observation {
 #[derive(Clone, Copy, Debug)]
 pub struct RefreshRequest {
     pub time: Duration,
+    /// Caller-confirmed refresh boundary.
     pub confirmed_index: u64,
 }
 
@@ -17,15 +18,27 @@ pub struct RefreshRequest {
 pub struct Comparison {
     pub matched: usize,
     pub repeats: usize,
+    /// First matches below the highest previously matched index.
     pub reordered: usize,
     pub wrong_source: usize,
+    /// Indices absent from expected emissions, including skipped steps.
     pub unknown: usize,
     pub unreadable: usize,
     pub unobserved: usize,
+    /// Late observations count only here.
     pub after_cutoff: usize,
+    /// Time from request to the first subsequent match at or beyond the confirmed index,
+    /// including repeats. `None` means no request or no recovery by cutoff.
     pub recovery: Option<Duration>,
 }
 
+/// Use one monotonic epoch and only outcomes produced by the inclusive cutoff.
+///
+/// # Errors
+///
+/// [`Error::InvalidExpectedFrames`] for non-increasing source indices,
+/// [`Error::InvalidObservationTimes`] for decreasing observation times or
+/// [`Error::InvalidRefreshRequest`] for a late request or a non-emitted refresh index.
 pub fn compare_frames(
     source_id: u32,
     expected: &[EncodeOutcome],

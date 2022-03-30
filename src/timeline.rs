@@ -2,6 +2,11 @@ use crate::{Error, FrameMetadata, FRAMES_PER_SECOND};
 use std::convert::TryFrom;
 use std::time::Duration;
 
+/// `floor(source_index * clock_rate / 60)` ticks, with caller-managed epoch and wrapping.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidClockRate`] for zero Hz or [`Error::ClockOverflow`] beyond `u64`.
 pub fn clock_ticks(source_index: u64, clock_rate: u32) -> Result<u64, Error> {
     if clock_rate == 0 {
         return Err(Error::InvalidClockRate);

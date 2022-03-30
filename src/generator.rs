@@ -29,6 +29,9 @@ pub struct Generator {
 }
 
 impl Generator {
+    /// # Errors
+    ///
+    /// [`Error::Encoder`] if native construction fails.
     pub fn new(config: Config) -> Result<Self, Error> {
         Ok(Self {
             encoder: Encoder::new(config)?,
@@ -41,10 +44,23 @@ impl Generator {
         })
     }
 
+    /// Skips advance source time too.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Encoder`], [`Error::UnexpectedRefresh`] or a header error from
+    /// [`crate::inspect_picture`] faults the generator. Later calls return [`Error::Faulted`].
+    /// [`Error::TimelineExhausted`] preserves the last frame.
     pub fn generate(&mut self) -> Result<EncodeOutcome, Error> {
         self.generate_with(Encoder::encode)
     }
 
+    /// The last scene continues. Cuts keep source indices and do not request refresh.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidScenes`] for empty lists, nonzero first starts or non-increasing starts.
+    /// [`Error::Encoder`] if native construction fails.
     pub fn with_scenes(config: Config, scenes: Vec<(u64, Pattern)>) -> Result<Self, Error> {
         if scenes.first().map(|scene| scene.0) != Some(0)
             || scenes.windows(2).any(|pair| pair[0].0 >= pair[1].0)
@@ -56,6 +72,11 @@ impl Generator {
         Ok(generator)
     }
 
+    /// Restarts encoding at the next step, preserving source time. Requests coalesce through skips.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Faulted`] or [`Error::TimelineExhausted`], without mutation.
     pub fn request_refresh(&mut self) -> Result<(), Error> {
         self.next_metadata()?;
         if self.refresh == Refresh::None {
@@ -64,6 +85,9 @@ impl Generator {
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// [`Error::Faulted`] or [`Error::TimelineExhausted`].
     pub fn next_metadata(&self) -> Result<FrameMetadata, Error> {
         if matches!(self.state, State::Faulted) {
             return Err(Error::Faulted);
@@ -71,6 +95,7 @@ impl Generator {
         timeline::step(self.next_index).map(|(metadata, _)| metadata)
     }
 
+    /// Latest compact I420 pixels. `None` before the first step or when faulted.
     pub fn raw_frame(&self) -> Option<RawFrame<'_>> {
         match self.state {
             State::Ready => Some(self.frame.view()),

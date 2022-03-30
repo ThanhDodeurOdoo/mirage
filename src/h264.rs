@@ -19,6 +19,12 @@ pub struct NalUnits<'a> {
     remaining: Option<&'a [u8]>,
 }
 
+/// Borrow NALs from one Annex B picture, stripping prefixes and zero padding.
+///
+/// # Errors
+///
+/// Stops on [`Error::InvalidAnnexB`] for empty input or missing framing,
+/// [`Error::EmptyNalUnit`] for an empty NAL or [`Error::InvalidNalHeader`] for a forbidden bit.
 pub fn nal_units(bytes: &[u8]) -> NalUnits<'_> {
     NalUnits {
         remaining: Some(bytes),
@@ -72,6 +78,11 @@ pub struct PictureHeaders<'a> {
     pub has_idr: bool,
 }
 
+/// Header inspection does not validate decodability.
+///
+/// # Errors
+///
+/// Returns [`nal_units`] errors or [`Error::TruncatedSps`] for missing SPS fields.
 pub fn inspect_picture(bytes: &[u8]) -> Result<PictureHeaders<'_>, Error> {
     let mut headers = PictureHeaders {
         sps: None,

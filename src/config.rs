@@ -23,6 +23,10 @@ pub struct Config {
 }
 
 impl Config {
+    /// # Errors
+    ///
+    /// [`Error::InvalidDimensions`]: not even or outside 16x16..=1920x1080.
+    /// [`Error::InvalidBitrate`]: outside 1..=i32::MAX. [`Error::FrameSizeOverflow`]: size overflow.
     pub fn new(width: u32, height: u32, bitrate_bps: u32, pattern: Pattern) -> Result<Self, Error> {
         if width < MIN_DIMENSION
             || width > MAX_WIDTH
@@ -53,6 +57,9 @@ impl Config {
         self.width
     }
 
+    /// # Errors
+    ///
+    /// [`Error::IdentityCardTooSmall`] below 152x88.
     pub fn with_identity(mut self, source_id: u32) -> Result<Self, Error> {
         if (self.width as usize) < crate::identity::MIN_WIDTH
             || (self.height as usize) < crate::identity::MIN_HEIGHT
