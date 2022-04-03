@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+mod clip;
 mod compare;
 mod config;
 mod encoder;
@@ -33,6 +34,7 @@ mod identity;
 mod pattern;
 mod timeline;
 
+pub use clip::{Clip, ClipFrame};
 pub use compare::{compare_frames, Comparison, Observation, RefreshRequest};
 pub use config::{Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;

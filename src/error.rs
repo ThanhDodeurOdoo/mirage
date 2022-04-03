@@ -10,6 +10,9 @@ pub enum Error {
     InvalidExpectedFrames,
     InvalidObservationTimes,
     InvalidRefreshRequest,
+    InvalidClipOrder,
+    ClipStepLimit,
+    ClipByteLimit,
     FrameSizeOverflow,
     TimelineExhausted,
     InvalidClockRate,
@@ -42,6 +45,11 @@ impl fmt::Display for Error {
             Self::InvalidRefreshRequest => {
                 f.write_str("refresh time exceeds cutoff or confirmed index was not emitted")
             }
+            Self::InvalidClipOrder => {
+                f.write_str("clip source indices and times must increase strictly")
+            }
+            Self::ClipStepLimit => f.write_str("clip step limit reached"),
+            Self::ClipByteLimit => f.write_str("clip encoded-byte limit exceeded"),
             Self::FrameSizeOverflow => f.write_str("frame size overflow"),
             Self::TimelineExhausted => f.write_str("timeline exhausted"),
             Self::InvalidClockRate => f.write_str("clock rate must be positive"),
