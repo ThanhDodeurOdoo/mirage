@@ -42,6 +42,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         clip.push(generator.generate()?)?;
     }
     write_fixture(&directory, clip.frames())?;
+    let (refresh_start, source_index) = clip
+        .frames()
+        .iter()
+        .enumerate()
+        .find_map(|(position, frame)| match &frame.outcome {
+            EncodeOutcome::Emitted { metadata, .. }
+                if metadata.source_index >= REFRESH_INDEX
+                    && frame.has_sps
+                    && frame.has_pps
+                    && frame.has_idr =>
+            {
+                Some((position, metadata.source_index))
+            }
+            _ => None,
+        })
+        .ok_or(mirage::Error::UnexpectedRefresh)?;
+    let suffix = directory.join("refresh");
+    fs::create_dir(&suffix)?;
+    write_fixture(&suffix, &clip.frames()[refresh_start..])?;
+    println!("refresh suffix starts at source index {}", source_index);
     println!(
         "source {}, {}x{}, {} encoded bytes",
         SOURCE_ID,
@@ -100,7 +120,8 @@ fn write_fixture(directory: &Path, frames: &[ClipFrame]) -> Result<(), Box<dyn E
     video.flush()?;
     timeline.flush()?;
     println!(
-        "{} emitted, {} skipped ({} source steps)",
+        "{}: {} emitted, {} skipped ({} source steps)",
+        directory.display(),
         emitted,
         skipped,
         frames.len()
