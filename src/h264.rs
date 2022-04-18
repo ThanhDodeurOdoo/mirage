@@ -111,6 +111,7 @@ pub fn inspect_picture(bytes: &[u8]) -> Result<PictureHeaders<'_>, Error> {
     Ok(headers)
 }
 
+#[cfg(feature = "h264")]
 pub(crate) fn confirm_refresh(bytes: &[u8]) -> Result<(), Error> {
     let headers = inspect_picture(bytes)?;
     if !headers.has_idr {

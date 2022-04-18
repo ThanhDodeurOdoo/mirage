@@ -1,6 +1,42 @@
 use crate::frame::YuvFrame;
 use crate::{Config, EncodeOutcome, Error, FrameKind, FrameMetadata};
 use openh264::encoder::{EncoderConfig, FrameType};
+use openh264::formats::YUVSource;
+
+// Compact I420: Y, U, V with strides width, width/2, width/2.
+impl YUVSource for YuvFrame {
+    fn width(&self) -> i32 {
+        self.view().width() as i32
+    }
+
+    fn height(&self) -> i32 {
+        self.view().height() as i32
+    }
+
+    fn y(&self) -> &[u8] {
+        self.view().y()
+    }
+
+    fn u(&self) -> &[u8] {
+        self.view().u()
+    }
+
+    fn v(&self) -> &[u8] {
+        self.view().v()
+    }
+
+    fn y_stride(&self) -> i32 {
+        self.view().width() as i32
+    }
+
+    fn u_stride(&self) -> i32 {
+        (self.view().width() / 2) as i32
+    }
+
+    fn v_stride(&self) -> i32 {
+        self.u_stride()
+    }
+}
 
 pub(crate) struct Encoder(openh264::encoder::Encoder);
 

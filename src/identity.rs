@@ -1,3 +1,4 @@
+#[cfg(any(feature = "h264", test))]
 use crate::frame::{YuvFrame, BLACK, WHITE};
 use crate::Error;
 
@@ -65,6 +66,7 @@ pub fn read_identity(
     }))
 }
 
+#[cfg(any(feature = "h264", test))]
 pub(crate) fn render_identity(frame: &mut YuvFrame, source_id: u32, source_index: u64) {
     let mut bytes = [0; 16];
     bytes[..2].copy_from_slice(&[0x55, 0xd3]);

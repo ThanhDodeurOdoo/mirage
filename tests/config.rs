@@ -1,4 +1,5 @@
 use mirage::{Config, Error, Pattern, FRAMES_PER_SECOND};
+#[cfg(feature = "h264")]
 use std::error::Error as _;
 
 #[test]
@@ -60,6 +61,7 @@ fn rejects_invalid_bitrates() {
     }
 }
 
+#[cfg(feature = "h264")]
 #[test]
 fn preserves_encoder_error_source() {
     let error = Error::Encoder(openh264::Error::msg("test failure"));

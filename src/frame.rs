@@ -1,5 +1,5 @@
+#[cfg(any(feature = "h264", test))]
 use crate::Config;
-use openh264::formats::YUVSource;
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
@@ -33,10 +33,14 @@ impl<'a> RawFrame<'a> {
     }
 }
 
+#[cfg(any(feature = "h264", test))]
 pub(crate) const BLACK: u8 = 16;
+#[cfg(any(feature = "h264", test))]
 pub(crate) const WHITE: u8 = 235;
+#[cfg(any(feature = "h264", test))]
 const NEUTRAL_CHROMA: u8 = 128;
 
+#[cfg(any(feature = "h264", test))]
 pub(crate) struct YuvFrame {
     width: u32,
     height: u32,
@@ -44,6 +48,7 @@ pub(crate) struct YuvFrame {
     data: Vec<u8>,
 }
 
+#[cfg(any(feature = "h264", test))]
 impl YuvFrame {
     pub(crate) fn new(config: Config) -> Self {
         let y_len = config.width() as usize * config.height() as usize;
@@ -70,41 +75,6 @@ impl YuvFrame {
 
     pub(crate) fn y_mut(&mut self) -> &mut [u8] {
         &mut self.data[..self.y_len]
-    }
-}
-
-// Compact I420: Y, U, V with strides width, width/2, width/2.
-impl YUVSource for YuvFrame {
-    fn width(&self) -> i32 {
-        self.width as i32
-    }
-
-    fn height(&self) -> i32 {
-        self.height as i32
-    }
-
-    fn y(&self) -> &[u8] {
-        self.view().y()
-    }
-
-    fn u(&self) -> &[u8] {
-        self.view().u()
-    }
-
-    fn v(&self) -> &[u8] {
-        self.view().v()
-    }
-
-    fn y_stride(&self) -> i32 {
-        self.width as i32
-    }
-
-    fn u_stride(&self) -> i32 {
-        (self.width / 2) as i32
-    }
-
-    fn v_stride(&self) -> i32 {
-        self.u_stride()
     }
 }
 
@@ -138,6 +108,8 @@ pub enum EncodeOutcome {
 mod tests {
     use super::*;
     use crate::Pattern;
+    #[cfg(feature = "h264")]
+    use openh264::formats::YUVSource;
 
     #[test]
     fn compact_plane_layout() {
@@ -151,6 +123,7 @@ mod tests {
             let frame = YuvFrame::new(config);
             let raw = frame.view();
             assert_eq!((raw.width(), raw.height()), (width, height));
+            #[cfg(feature = "h264")]
             assert_eq!(
                 (frame.width(), frame.height()),
                 (width as i32, height as i32)
@@ -159,7 +132,9 @@ mod tests {
                 (raw.y().len(), raw.u().len(), raw.v().len()),
                 (y_len, chroma_len, chroma_len)
             );
+            #[cfg(feature = "h264")]
             assert_eq!(frame.y_stride(), width as i32);
+            #[cfg(feature = "h264")]
             assert_eq!(
                 (frame.u_stride(), frame.v_stride()),
                 ((width / 2) as i32, (width / 2) as i32)
@@ -178,7 +153,8 @@ mod tests {
     #[test]
     fn reuses_storage_when_luma_changes() {
         let mut frame = YuvFrame::new(Config::default());
-        let addresses = (frame.y().as_ptr(), frame.u().as_ptr(), frame.v().as_ptr());
+        let raw = frame.view();
+        let addresses = (raw.y().as_ptr(), raw.u().as_ptr(), raw.v().as_ptr());
         for &luma in &[235, 16, 89] {
             frame.y_mut().fill(luma);
             let raw = frame.view();

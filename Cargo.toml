@@ -5,5 +5,21 @@ edition = "2018"
 description = "A small library for generating synthetic video"
 publish = false
 
+[features]
+default = ["h264"]
+h264 = ["openh264"]
+
 [dependencies]
-openh264 = { version = "=0.2.8", default-features = false, features = ["encoder"] }
+openh264 = { version = "=0.2.8", optional = true, default-features = false, features = ["encoder"] }
+
+[[test]]
+name = "encoder"
+required-features = ["h264"]
+
+[[test]]
+name = "generator"
+required-features = ["h264"]
+
+[[example]]
+name = "render"
+required-features = ["h264"]

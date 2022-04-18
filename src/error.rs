@@ -2,7 +2,10 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum Error {
-    InvalidDimensions { width: u32, height: u32 },
+    InvalidDimensions {
+        width: u32,
+        height: u32,
+    },
     InvalidBitrate(u32),
     InvalidScenes,
     IdentityCardTooSmall,
@@ -22,6 +25,7 @@ pub enum Error {
     InvalidNalHeader,
     TruncatedSps,
     UnexpectedRefresh,
+    #[cfg(feature = "h264")]
     Encoder(openh264::Error),
     Faulted,
 }
@@ -61,6 +65,7 @@ impl fmt::Display for Error {
             Self::UnexpectedRefresh => {
                 f.write_str("expected SPS, PPS and IDR after encoder restart")
             }
+            #[cfg(feature = "h264")]
             Self::Encoder(error) => write!(f, "encoder failed: {}", error),
             Self::Faulted => f.write_str("generator is faulted"),
         }
@@ -70,6 +75,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "h264")]
             Self::Encoder(error) => Some(error),
             _ => None,
         }
