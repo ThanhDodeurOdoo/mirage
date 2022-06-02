@@ -1,5 +1,6 @@
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 use crate::Config;
+use crate::{inspect_picture, Codec, Error, PictureHeaders};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
@@ -33,14 +34,14 @@ impl<'a> RawFrame<'a> {
     }
 }
 
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 pub(crate) const BLACK: u8 = 16;
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 pub(crate) const WHITE: u8 = 235;
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 const NEUTRAL_CHROMA: u8 = 128;
 
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 pub(crate) struct YuvFrame {
     width: u32,
     height: u32,
@@ -48,7 +49,7 @@ pub(crate) struct YuvFrame {
     data: Vec<u8>,
 }
 
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 impl YuvFrame {
     pub(crate) fn new(config: Config) -> Self {
         let y_len = config.width() as usize * config.height() as usize;
@@ -76,6 +77,11 @@ impl YuvFrame {
     pub(crate) fn y_mut(&mut self) -> &mut [u8] {
         &mut self.data[..self.y_len]
     }
+
+    #[cfg(feature = "vp8")]
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +96,17 @@ pub enum FrameKind {
     I,
     P,
     IpMixed,
+    Vp8Key,
+    Vp8Inter,
+}
+
+impl FrameKind {
+    pub fn codec(self) -> Codec {
+        match self {
+            Self::Idr | Self::I | Self::P | Self::IpMixed => Codec::H264,
+            Self::Vp8Key | Self::Vp8Inter => Codec::Vp8,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -102,6 +119,23 @@ pub enum EncodeOutcome {
     Skipped {
         metadata: FrameMetadata,
     },
+}
+
+impl EncodeOutcome {
+    /// # Errors
+    ///
+    /// [`Error::UnsupportedCodec`] for VP8 or errors from [`inspect_picture`].
+    pub fn h264_headers(&self) -> Result<Option<PictureHeaders<'_>>, Error> {
+        match self {
+            Self::Emitted { bytes, kind, .. } => {
+                if kind.codec() != Codec::H264 {
+                    return Err(Error::UnsupportedCodec(kind.codec()));
+                }
+                inspect_picture(bytes).map(Some)
+            }
+            Self::Skipped { .. } => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -225,6 +225,10 @@ impl Encoder {
         })
     }
 
+    pub fn max_pts(&self) -> i64 {
+        self.max_pts
+    }
+
     /// # Errors
     /// Returns [`Error`] for noncompact I420, unsupported or nonincreasing PTS or native errors.
     pub fn encode(&mut self, pts: i64, data: &[u8]) -> Result<Packets> {

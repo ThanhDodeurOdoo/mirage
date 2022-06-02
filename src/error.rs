@@ -25,6 +25,11 @@ pub enum Error {
     InvalidNalHeader,
     TruncatedSps,
     UnexpectedRefresh,
+    CodecUnavailable(crate::Codec),
+    UnsupportedCodec(crate::Codec),
+    UnexpectedVpxOutput,
+    #[cfg(feature = "vp8")]
+    VpxEncoder(vpx_encode::Error),
     #[cfg(feature = "h264")]
     Encoder(openh264::Error),
     Faulted,
@@ -65,6 +70,15 @@ impl fmt::Display for Error {
             Self::UnexpectedRefresh => {
                 f.write_str("expected SPS, PPS and IDR after encoder restart")
             }
+            Self::CodecUnavailable(codec) => write!(f, "codec feature is disabled: {:?}", codec),
+            Self::UnsupportedCodec(codec) => {
+                write!(f, "unsupported codec for this operation: {:?}", codec)
+            }
+            Self::UnexpectedVpxOutput => {
+                f.write_str("expected one VP8 picture with the current source timestamp")
+            }
+            #[cfg(feature = "vp8")]
+            Self::VpxEncoder(error) => write!(f, "VP8 encoder failed: {}", error),
             #[cfg(feature = "h264")]
             Self::Encoder(error) => write!(f, "encoder failed: {}", error),
             Self::Faulted => f.write_str("generator is faulted"),
@@ -75,6 +89,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "vp8")]
+            Self::VpxEncoder(error) => Some(error),
             #[cfg(feature = "h264")]
             Self::Encoder(error) => Some(error),
             _ => None,

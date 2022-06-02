@@ -1,7 +1,7 @@
-//! Small test pictures, real H.264. No camera needed.
+//! Small test pictures, real video. No camera needed.
 //!
-//! Generate grayscale I420 frames and H.264 in memory at a nominal 60 Hz.
-//! You handle pacing, files and networking. The default `h264` feature enables encoding.
+//! Generate I420 and encoded video in memory at 60 Hz. You handle pacing, files and networking.
+//! H.264 is enabled by default. For VP8, enable `vp8` and select [`Codec::Vp8`].
 //!
 //! ```rust
 //! # #[cfg(feature = "h264")]
@@ -28,24 +28,24 @@
 mod clip;
 mod compare;
 mod config;
-#[cfg(feature = "h264")]
+#[cfg(any(feature = "h264", feature = "vp8"))]
 mod encoder;
 mod error;
 mod frame;
-#[cfg(feature = "h264")]
+#[cfg(any(feature = "h264", feature = "vp8"))]
 mod generator;
 mod h264;
 mod identity;
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 mod pattern;
 mod timeline;
 
 pub use clip::{Clip, ClipFrame};
 pub use compare::{compare_frames, Comparison, Observation, RefreshRequest};
-pub use config::{Config, Pattern, FRAMES_PER_SECOND};
+pub use config::{Codec, Config, Pattern, FRAMES_PER_SECOND};
 pub use error::Error;
 pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
-#[cfg(feature = "h264")]
+#[cfg(any(feature = "h264", feature = "vp8"))]
 pub use generator::Generator;
 pub use h264::{inspect_picture, nal_units, NalUnit, NalUnits, PictureHeaders, Sps};
 pub use identity::{read_identity, FrameIdentity};

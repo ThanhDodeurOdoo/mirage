@@ -7,6 +7,12 @@ const MAX_HEIGHT: u32 = 1080;
 pub const FRAMES_PER_SECOND: u32 = 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    H264,
+    Vp8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pattern {
     Checkerboard,
     MovingRectangle,
@@ -15,6 +21,7 @@ pub enum Pattern {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Config {
+    codec: Codec,
     width: u32,
     height: u32,
     bitrate_bps: u32,
@@ -45,12 +52,22 @@ impl Config {
             .and_then(|pixels| pixels.checked_add(pixels / 2))
             .ok_or(Error::FrameSizeOverflow)?;
         Ok(Self {
+            codec: Codec::H264,
             width,
             height,
             bitrate_bps,
             pattern,
             identity_source: None,
         })
+    }
+
+    pub fn with_codec(mut self, codec: Codec) -> Self {
+        self.codec = codec;
+        self
+    }
+
+    pub fn codec(&self) -> Codec {
+        self.codec
     }
 
     pub fn width(&self) -> u32 {
@@ -90,6 +107,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            codec: Codec::H264,
             width: 320,
             height: 240,
             bitrate_bps: 1_000_000,

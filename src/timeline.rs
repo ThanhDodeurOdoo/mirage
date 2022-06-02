@@ -1,8 +1,8 @@
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 use crate::FrameMetadata;
 use crate::{Error, FRAMES_PER_SECOND};
 use std::convert::TryFrom;
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 use std::time::Duration;
 
 /// `floor(source_index * clock_rate / 60)` ticks, with caller-managed epoch and wrapping.
@@ -18,7 +18,7 @@ pub fn clock_ticks(source_index: u64, clock_rate: u32) -> Result<u64, Error> {
     u64::try_from(ticks).map_err(|_| Error::ClockOverflow)
 }
 
-#[cfg(any(feature = "h264", test))]
+#[cfg(any(feature = "h264", feature = "vp8", test))]
 pub(crate) fn step(source_index: u64) -> Result<(FrameMetadata, u64), Error> {
     let next_index = source_index
         .checked_add(1)

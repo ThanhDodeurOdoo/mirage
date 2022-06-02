@@ -3,7 +3,7 @@ use crate::frame::YuvFrame;
 use crate::h264::confirm_refresh;
 use crate::identity::render_identity;
 use crate::pattern::{render_checkerboard, render_moving_rectangle, render_texture};
-use crate::{timeline, Config, EncodeOutcome, Error, FrameMetadata, Pattern, RawFrame};
+use crate::{timeline, Codec, Config, EncodeOutcome, Error, FrameMetadata, Pattern, RawFrame};
 
 enum State {
     Initial,
@@ -31,7 +31,8 @@ pub struct Generator {
 impl Generator {
     /// # Errors
     ///
-    /// [`Error::Encoder`] if native construction fails.
+    /// [`Error::CodecUnavailable`] for disabled features or [`Error::InvalidBitrate`] for
+    /// native limits. `Error::Encoder` and `Error::VpxEncoder` retain native failures.
     pub fn new(config: Config) -> Result<Self, Error> {
         Ok(Self {
             encoder: Encoder::new(config)?,
@@ -48,8 +49,8 @@ impl Generator {
     ///
     /// # Errors
     ///
-    /// [`Error::Encoder`], [`Error::UnexpectedRefresh`] or a header error from
-    /// [`crate::inspect_picture`] faults the generator. Later calls return [`Error::Faulted`].
+    /// Native encoder errors, [`Error::UnexpectedVpxOutput`], [`Error::UnexpectedRefresh`]
+    /// or [`crate::inspect_picture`] errors fault the generator. Later calls return [`Error::Faulted`].
     /// [`Error::TimelineExhausted`] preserves the last frame.
     pub fn generate(&mut self) -> Result<EncodeOutcome, Error> {
         self.generate_with(Encoder::encode)
@@ -60,7 +61,7 @@ impl Generator {
     /// # Errors
     ///
     /// [`Error::InvalidScenes`] for empty lists, nonzero first starts or non-increasing starts.
-    /// [`Error::Encoder`] if native construction fails.
+    /// Construction errors from [`Self::new`].
     pub fn with_scenes(config: Config, scenes: Vec<(u64, Pattern)>) -> Result<Self, Error> {
         if scenes.first().map(|scene| scene.0) != Some(0)
             || scenes.windows(2).any(|pair| pair[0].0 >= pair[1].0)
@@ -76,9 +77,13 @@ impl Generator {
     ///
     /// # Errors
     ///
-    /// [`Error::Faulted`] or [`Error::TimelineExhausted`], without mutation.
+    /// [`Error::Faulted`], [`Error::TimelineExhausted`] or [`Error::UnsupportedCodec`]
+    /// for VP8, without mutation.
     pub fn request_refresh(&mut self) -> Result<(), Error> {
         self.next_metadata()?;
+        if self.config.codec() != Codec::H264 {
+            return Err(Error::UnsupportedCodec(self.config.codec()));
+        }
         if self.refresh == Refresh::None {
             self.refresh = Refresh::Requested;
         }
@@ -91,6 +96,9 @@ impl Generator {
     pub fn next_metadata(&self) -> Result<FrameMetadata, Error> {
         if matches!(self.state, State::Faulted) {
             return Err(Error::Faulted);
+        }
+        if self.next_index > self.encoder.max_index() {
+            return Err(Error::TimelineExhausted);
         }
         timeline::step(self.next_index).map(|(metadata, _)| metadata)
     }
@@ -107,10 +115,8 @@ impl Generator {
         &mut self,
         encode: impl FnOnce(&mut Encoder, &YuvFrame, FrameMetadata) -> Result<EncodeOutcome, Error>,
     ) -> Result<EncodeOutcome, Error> {
-        if matches!(self.state, State::Faulted) {
-            return Err(Error::Faulted);
-        }
-        let (metadata, next_index) = timeline::step(self.next_index)?;
+        let metadata = self.next_metadata()?;
+        let next_index = self.next_index + 1;
         if self.refresh == Refresh::Requested {
             match Encoder::new(self.config) {
                 Ok(encoder) => {
@@ -167,7 +173,7 @@ impl Generator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "h264"))]
 mod tests {
     use super::*;
     use std::error::Error as _;

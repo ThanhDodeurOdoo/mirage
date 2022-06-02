@@ -93,6 +93,7 @@ fn write_fixture(directory: &Path, frames: &[ClipFrame]) -> Result<(), Box<dyn E
                     mirage::FrameKind::I => "I",
                     mirage::FrameKind::P => "P",
                     mirage::FrameKind::IpMixed => "IpMixed",
+                    _ => return Err(mirage::Error::UnsupportedCodec(kind.codec()).into()),
                 };
                 (metadata, "emitted", bytes.len(), kind)
             }

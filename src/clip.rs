@@ -1,4 +1,4 @@
-use crate::{inspect_picture, Config, EncodeOutcome, Error, FrameMetadata};
+use crate::{Codec, Config, EncodeOutcome, Error, FrameMetadata};
 
 #[derive(Debug)]
 pub struct ClipFrame {
@@ -32,9 +32,13 @@ impl Clip {
     /// # Errors
     ///
     /// [`Error::InvalidClipOrder`] for non-increasing indices or times,
-    /// [`Error::ClipStepLimit`], [`Error::ClipByteLimit`] or [`inspect_picture`] errors.
+    /// [`Error::ClipStepLimit`], [`Error::ClipByteLimit`], [`Error::UnsupportedCodec`]
+    /// for VP8 or [`EncodeOutcome::h264_headers`] errors.
     /// Rejection leaves the clip unchanged.
     pub fn push(&mut self, outcome: EncodeOutcome) -> Result<(), Error> {
+        if self.config.codec() != Codec::H264 {
+            return Err(Error::UnsupportedCodec(self.config.codec()));
+        }
         let current = metadata(&outcome);
         if let Some(last) = self.frames.last() {
             let previous = metadata(&last.outcome);
@@ -47,20 +51,20 @@ impl Clip {
         if self.frames.len() >= self.max_steps {
             return Err(Error::ClipStepLimit);
         }
-        let (byte_count, has_sps, has_pps, has_idr) = match &outcome {
-            EncodeOutcome::Emitted { bytes, .. } => {
-                if bytes.len() > self.max_bytes - self.encoded_bytes {
-                    return Err(Error::ClipByteLimit);
-                }
-                let headers = inspect_picture(bytes)?;
-                (
-                    bytes.len(),
-                    headers.sps.is_some(),
-                    headers.pps.is_some(),
-                    headers.has_idr,
-                )
-            }
-            EncodeOutcome::Skipped { .. } => (0, false, false, false),
+        let byte_count = match &outcome {
+            EncodeOutcome::Emitted { bytes, .. } => bytes.len(),
+            EncodeOutcome::Skipped { .. } => 0,
+        };
+        if byte_count > self.max_bytes - self.encoded_bytes {
+            return Err(Error::ClipByteLimit);
+        }
+        let (has_sps, has_pps, has_idr) = match outcome.h264_headers()? {
+            Some(headers) => (
+                headers.sps.is_some(),
+                headers.pps.is_some(),
+                headers.has_idr,
+            ),
+            None => (false, false, false),
         };
         self.encoded_bytes += byte_count;
         self.frames.push(ClipFrame {
