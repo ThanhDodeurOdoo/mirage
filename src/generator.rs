@@ -77,13 +77,9 @@ impl Generator {
     ///
     /// # Errors
     ///
-    /// [`Error::Faulted`], [`Error::TimelineExhausted`] or [`Error::UnsupportedCodec`]
-    /// for VP8, without mutation.
+    /// [`Error::Faulted`] or [`Error::TimelineExhausted`], without mutation.
     pub fn request_refresh(&mut self) -> Result<(), Error> {
         self.next_metadata()?;
-        if self.config.codec() != Codec::H264 {
-            return Err(Error::UnsupportedCodec(self.config.codec()));
-        }
         if self.refresh == Refresh::None {
             self.refresh = Refresh::Requested;
         }
@@ -152,8 +148,12 @@ impl Generator {
         }
         let outcome = encode(&mut self.encoder, &self.frame, metadata).and_then(|outcome| {
             if self.refresh == Refresh::AwaitingEmission {
-                if let EncodeOutcome::Emitted { bytes, .. } = &outcome {
-                    confirm_refresh(bytes)?;
+                if let EncodeOutcome::Emitted { bytes, kind, .. } = &outcome {
+                    match self.config.codec() {
+                        Codec::H264 => confirm_refresh(bytes)?,
+                        Codec::Vp8 if *kind == crate::FrameKind::Vp8Key => {}
+                        Codec::Vp8 => return Err(Error::UnexpectedRefresh),
+                    }
                     self.refresh = Refresh::None;
                 }
             }
@@ -170,6 +170,76 @@ impl Generator {
                 Err(error)
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "vp8"))]
+mod vp8_tests {
+    use super::*;
+    use crate::FrameKind;
+
+    #[test]
+    fn refresh_keeps_the_source_and_respects_terminal_states() -> Result<(), Error> {
+        let config = Config::default().with_codec(Codec::Vp8).with_identity(7)?;
+        let mut generator = Generator::new(config)?;
+        generator.generate()?;
+        let pixels = generator.raw_frame().unwrap().y().to_vec();
+        generator.next_index = generator.encoder.max_index() + 1;
+        assert!(matches!(
+            generator.next_metadata(),
+            Err(Error::TimelineExhausted)
+        ));
+        assert!(matches!(
+            generator.request_refresh(),
+            Err(Error::TimelineExhausted)
+        ));
+        assert!(matches!(
+            generator.generate_with(|_, _, _| panic!("encoded past VP8 limit")),
+            Err(Error::TimelineExhausted)
+        ));
+        assert_eq!(generator.raw_frame().unwrap().y(), pixels.as_slice());
+        generator.next_index = 1;
+        generator.request_refresh()?;
+        generator.request_refresh()?;
+        generator.generate_with(|_, _, metadata| Ok(EncodeOutcome::Skipped { metadata }))?;
+        assert_eq!(generator.refresh, Refresh::AwaitingEmission);
+        generator.request_refresh()?;
+        assert_eq!(generator.refresh, Refresh::AwaitingEmission);
+        assert!(matches!(
+            generator.generate()?,
+            EncodeOutcome::Emitted {
+                metadata: FrameMetadata {
+                    source_index: 2,
+                    ..
+                },
+                kind: FrameKind::Vp8Key,
+                ..
+            }
+        ));
+        assert_eq!(generator.refresh, Refresh::None);
+        let raw = generator.raw_frame().unwrap();
+        assert_eq!(
+            crate::read_identity(raw.y(), 320, 240, 320)?
+                .unwrap()
+                .source_index,
+            2
+        );
+        generator.request_refresh()?;
+        let rejected = generator.generate_with(|_, _, metadata| {
+            Ok(EncodeOutcome::Emitted {
+                metadata,
+                bytes: vec![1, 0, 0],
+                kind: FrameKind::Vp8Inter,
+            })
+        });
+        assert!(matches!(rejected, Err(Error::UnexpectedRefresh)));
+        assert!(generator.raw_frame().is_none());
+        assert!(matches!(generator.request_refresh(), Err(Error::Faulted)));
+        assert!(matches!(
+            generator.generate_with(|_, _, _| panic!("encoded after failure")),
+            Err(Error::Faulted)
+        ));
+        Ok(())
     }
 }
 

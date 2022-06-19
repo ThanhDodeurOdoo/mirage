@@ -68,7 +68,7 @@ impl fmt::Display for Error {
             Self::InvalidNalHeader => f.write_str("H.264 forbidden zero bit is set"),
             Self::TruncatedSps => f.write_str("missing H.264 SPS profile, constraints or level"),
             Self::UnexpectedRefresh => {
-                f.write_str("expected SPS, PPS and IDR after encoder restart")
+                f.write_str("expected a decoder refresh after encoder restart")
             }
             Self::CodecUnavailable(codec) => write!(f, "codec feature is disabled: {:?}", codec),
             Self::UnsupportedCodec(codec) => {
