@@ -7,6 +7,8 @@ pub enum Error {
         height: u32,
     },
     InvalidBitrate(u32),
+    InvalidAudioAmplitude(i16),
+    InvalidAudioPeriod(u32),
     InvalidScenes,
     IdentityCardTooSmall,
     InvalidLumaLayout,
@@ -42,6 +44,12 @@ impl fmt::Display for Error {
                 write!(f, "unsupported dimensions: {}x{}", width, height)
             }
             Self::InvalidBitrate(bitrate) => write!(f, "unsupported bitrate: {} bps", bitrate),
+            Self::InvalidAudioAmplitude(amplitude) => {
+                write!(f, "audio amplitude must be nonnegative: {}", amplitude)
+            }
+            Self::InvalidAudioPeriod(period) => {
+                write!(f, "audio period must be at least two samples: {}", period)
+            }
             Self::InvalidScenes => f.write_str("scenes must start at zero and increase strictly"),
             Self::IdentityCardTooSmall => f.write_str("identity card needs at least 152x88 pixels"),
             Self::InvalidLumaLayout => {
