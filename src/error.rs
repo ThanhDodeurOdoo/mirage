@@ -9,6 +9,7 @@ pub enum Error {
     InvalidBitrate(u32),
     InvalidAudioAmplitude(i16),
     InvalidAudioPeriod(u32),
+    InvalidAudioBursts,
     InvalidScenes,
     IdentityCardTooSmall,
     InvalidLumaLayout,
@@ -49,6 +50,9 @@ impl fmt::Display for Error {
             }
             Self::InvalidAudioPeriod(period) => {
                 write!(f, "audio period must be at least two samples: {}", period)
+            }
+            Self::InvalidAudioBursts => {
+                f.write_str("audio bursts must be nonempty, sorted and disjoint")
             }
             Self::InvalidScenes => f.write_str("scenes must start at zero and increase strictly"),
             Self::IdentityCardTooSmall => f.write_str("identity card needs at least 152x88 pixels"),

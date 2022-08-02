@@ -1,4 +1,5 @@
 use crate::Error;
+use std::ops::Range;
 use std::time::Duration;
 
 pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
@@ -67,6 +68,7 @@ impl<'a> RawAudio<'a> {
 
 pub struct AudioGenerator {
     pattern: AudioPattern,
+    bursts: Option<Vec<Range<u64>>>,
     samples: [i16; AUDIO_BLOCK_SAMPLES as usize],
     next_sample_index: u64,
     metadata: Option<AudioMetadata>,
@@ -81,10 +83,30 @@ impl AudioGenerator {
         pattern.validate()?;
         Ok(Self {
             pattern,
+            bursts: None,
             samples: [0; AUDIO_BLOCK_SAMPLES as usize],
             next_sample_index: 0,
             metadata: None,
         })
+    }
+
+    /// Half-open sample ranges must be nonempty, sorted and disjoint. Adjacent ranges are allowed.
+    /// An empty schedule produces silence. Quiet intervals preserve absolute tone phase.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidAudioBursts`] for invalid ranges.
+    /// [`Error::InvalidAudioAmplitude`] for negative amplitude or
+    /// [`Error::InvalidAudioPeriod`] for periods below two samples.
+    pub fn with_bursts(pattern: AudioPattern, bursts: Vec<Range<u64>>) -> Result<Self, Error> {
+        if bursts.iter().any(|range| range.start >= range.end)
+            || bursts.windows(2).any(|pair| pair[0].end > pair[1].start)
+        {
+            return Err(Error::InvalidAudioBursts);
+        }
+        let mut generator = Self::new(pattern)?;
+        generator.bursts = Some(bursts);
+        Ok(generator)
     }
 
     /// # Errors
@@ -107,13 +129,19 @@ impl AudioGenerator {
 
     /// # Errors
     ///
-    /// [`Error::TimelineExhausted`] preserves the last completed block.
+    /// [`Error::TimelineExhausted`] on sample index overflow, preserving the last block.
     pub fn generate(&mut self) -> Result<AudioMetadata, Error> {
         let metadata = self.next_metadata()?;
         for (offset, sample) in self.samples.iter_mut().enumerate() {
-            *sample = self
-                .pattern
-                .sample_at(metadata.first_sample_index + offset as u64);
+            let index = metadata.first_sample_index + offset as u64;
+            let active = self.bursts.as_ref().map_or(true, |bursts| {
+                bursts.iter().any(|range| range.contains(&index))
+            });
+            *sample = if active {
+                self.pattern.sample_at(index)
+            } else {
+                0
+            };
         }
         self.next_sample_index += u64::from(AUDIO_BLOCK_SAMPLES);
         self.metadata = Some(metadata);
@@ -174,6 +202,46 @@ mod tests {
         }
         independent.generate()?;
         assert_eq!(independent.raw_block().unwrap().samples()[0], 32767);
+        Ok(())
+    }
+
+    #[test]
+    fn bursts_follow_exact_ranges_without_restarting_phase() -> Result<(), Error> {
+        let tone = AudioPattern::Tone {
+            amplitude: 23,
+            period: 7,
+        };
+        let mut generator =
+            AudioGenerator::with_bursts(tone, vec![2..5, 958..963, 963..965, 1441..1443])?;
+        let mut continuous = AudioGenerator::new(tone)?;
+        for _ in 0..3 {
+            assert_eq!(generator.generate()?, continuous.generate()?);
+            let raw = generator.raw_block().unwrap();
+            let full = continuous.raw_block().unwrap();
+            for (offset, &sample) in raw.samples().iter().enumerate() {
+                let index = raw.metadata().first_sample_index + offset as u64;
+                let expected = if matches!(index, 2..=4 | 958..=964 | 1441..=1442) {
+                    full.samples()[offset]
+                } else {
+                    0
+                };
+                assert_eq!(sample, expected, "sample {}", index);
+            }
+        }
+        let mut quiet = AudioGenerator::with_bursts(tone, vec![])?;
+        quiet.generate()?;
+        assert_eq!(quiet.raw_block().unwrap().samples(), &[0; 960]);
+        for ranges in [
+            vec![4..4],
+            vec![Range { start: 5, end: 4 }],
+            vec![2..5, 4..6],
+            vec![8..10, 2..4],
+        ] {
+            assert!(matches!(
+                AudioGenerator::with_bursts(tone, ranges),
+                Err(Error::InvalidAudioBursts)
+            ));
+        }
         Ok(())
     }
 
