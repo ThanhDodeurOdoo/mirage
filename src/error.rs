@@ -35,6 +35,8 @@ pub enum Error {
     VpxEncoder(vpx_encode::Error),
     #[cfg(feature = "h264")]
     Encoder(openh264::Error),
+    #[cfg(feature = "opus")]
+    OpusEncoder(audiopus::Error),
     Faulted,
 }
 
@@ -93,6 +95,8 @@ impl fmt::Display for Error {
             Self::VpxEncoder(error) => write!(f, "VP8 encoder failed: {}", error),
             #[cfg(feature = "h264")]
             Self::Encoder(error) => write!(f, "encoder failed: {}", error),
+            #[cfg(feature = "opus")]
+            Self::OpusEncoder(error) => write!(f, "Opus encoder failed: {}", error),
             Self::Faulted => f.write_str("generator is faulted"),
         }
     }
@@ -105,6 +109,8 @@ impl std::error::Error for Error {
             Self::VpxEncoder(error) => Some(error),
             #[cfg(feature = "h264")]
             Self::Encoder(error) => Some(error),
+            #[cfg(feature = "opus")]
+            Self::OpusEncoder(error) => Some(error),
             _ => None,
         }
     }

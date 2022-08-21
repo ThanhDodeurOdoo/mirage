@@ -37,6 +37,8 @@ mod frame;
 mod generator;
 mod h264;
 mod identity;
+#[cfg(feature = "opus")]
+mod opus;
 #[cfg(any(feature = "h264", feature = "vp8", test))]
 mod pattern;
 mod timeline;
@@ -53,4 +55,6 @@ pub use frame::{EncodeOutcome, FrameKind, FrameMetadata, RawFrame};
 pub use generator::Generator;
 pub use h264::{inspect_picture, nal_units, NalUnit, NalUnits, PictureHeaders, Sps};
 pub use identity::{read_identity, FrameIdentity};
+#[cfg(feature = "opus")]
+pub use opus::{AudioPacket, OpusConfig, OpusGenerator};
 pub use timeline::clock_ticks;
