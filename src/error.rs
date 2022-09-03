@@ -10,6 +10,7 @@ pub enum Error {
     InvalidAudioAmplitude(i16),
     InvalidAudioPeriod(u32),
     InvalidAudioBursts,
+    InvalidPacketLoss(u8),
     InvalidScenes,
     IdentityCardTooSmall,
     InvalidLumaLayout,
@@ -55,6 +56,13 @@ impl fmt::Display for Error {
             }
             Self::InvalidAudioBursts => {
                 f.write_str("audio bursts must be nonempty, sorted and disjoint")
+            }
+            Self::InvalidPacketLoss(percent) => {
+                write!(
+                    f,
+                    "expected packet loss must be at most 100 percent: {}",
+                    percent
+                )
             }
             Self::InvalidScenes => f.write_str("scenes must start at zero and increase strictly"),
             Self::IdentityCardTooSmall => f.write_str("identity card needs at least 152x88 pixels"),

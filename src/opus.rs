@@ -6,6 +6,8 @@ const MAX_PACKET_BYTES: usize = 1_275;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpusConfig {
     bitrate_bps: u32,
+    inband_fec: bool,
+    expected_loss: u8,
 }
 
 impl OpusConfig {
@@ -16,7 +18,24 @@ impl OpusConfig {
         if !(500..=300_000).contains(&bitrate_bps) {
             return Err(Error::InvalidBitrate(bitrate_bps));
         }
-        Ok(Self { bitrate_bps })
+        Ok(Self {
+            bitrate_bps,
+            ..Self::default()
+        })
+    }
+
+    /// Requests repair hints, without guaranteeing redundancy in any packet.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidPacketLoss`] for percentages above 100.
+    pub fn with_repair(mut self, inband_fec: bool, expected_loss: u8) -> Result<Self, Error> {
+        if expected_loss > 100 {
+            return Err(Error::InvalidPacketLoss(expected_loss));
+        }
+        self.inband_fec = inband_fec;
+        self.expected_loss = expected_loss;
+        Ok(self)
     }
 
     pub fn bitrate_bps(&self) -> u32 {
@@ -28,6 +47,8 @@ impl Default for OpusConfig {
     fn default() -> Self {
         Self {
             bitrate_bps: 24_000,
+            inband_fec: false,
+            expected_loss: 0,
         }
     }
 }
@@ -56,7 +77,12 @@ impl OpusGenerator {
         encoder
             .set_bitrate(Bitrate::BitsPerSecond(config.bitrate_bps as i32))
             .map_err(Error::OpusEncoder)?;
-        encoder.disable_inband_fec().map_err(Error::OpusEncoder)?;
+        encoder
+            .set_inband_fec(config.inband_fec)
+            .map_err(Error::OpusEncoder)?;
+        encoder
+            .set_packet_loss_perc(config.expected_loss)
+            .map_err(Error::OpusEncoder)?;
         let lookahead = encoder.lookahead().map_err(Error::OpusEncoder)?;
         Ok(Self {
             source,
@@ -128,6 +154,31 @@ mod tests {
     use std::error::Error as _;
 
     const OPUS_GET_DTX_REQUEST: i32 = 4017;
+
+    #[test]
+    fn repair_hints_reach_the_encoder() -> Result<(), Box<dyn std::error::Error>> {
+        assert!(matches!(
+            OpusConfig::default().with_repair(true, 101),
+            Err(Error::InvalidPacketLoss(101))
+        ));
+        for (fec, loss) in [(false, 0), (true, 25), (true, 100)] {
+            let mut generator = OpusGenerator::new(
+                AudioGenerator::new(AudioPattern::Tone {
+                    amplitude: 4000,
+                    period: 120,
+                })?,
+                OpusConfig::default().with_repair(fec, loss)?,
+            )?;
+            assert_eq!(generator.encoder.inband_fec()?, fec);
+            assert_eq!(generator.encoder.packet_loss_perc()?, loss);
+            let packet = generator.generate()?;
+            assert_eq!(
+                audiopus::packet::nb_samples(&packet.bytes, SampleRate::Hz48000)?,
+                960
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn native_failure_hides_pcm_and_faults_the_stream() -> Result<(), Error> {
