@@ -2,12 +2,14 @@ use crate::{AudioGenerator, AudioMetadata, Error, RawAudio};
 use audiopus::{coder::Encoder, Application, Bitrate, Channels, SampleRate};
 
 const MAX_PACKET_BYTES: usize = 1_275;
+const OPUS_SET_DTX_REQUEST: i32 = 4016;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpusConfig {
     bitrate_bps: u32,
     inband_fec: bool,
     expected_loss: u8,
+    dtx: bool,
 }
 
 impl OpusConfig {
@@ -38,6 +40,11 @@ impl OpusConfig {
         Ok(self)
     }
 
+    pub fn with_dtx(mut self, enabled: bool) -> Self {
+        self.dtx = enabled;
+        self
+    }
+
     pub fn bitrate_bps(&self) -> u32 {
         self.bitrate_bps
     }
@@ -49,6 +56,7 @@ impl Default for OpusConfig {
             bitrate_bps: 24_000,
             inband_fec: false,
             expected_loss: 0,
+            dtx: false,
         }
     }
 }
@@ -82,6 +90,9 @@ impl OpusGenerator {
             .map_err(Error::OpusEncoder)?;
         encoder
             .set_packet_loss_perc(config.expected_loss)
+            .map_err(Error::OpusEncoder)?;
+        encoder
+            .set_encoder_ctl_request(OPUS_SET_DTX_REQUEST, i32::from(config.dtx))
             .map_err(Error::OpusEncoder)?;
         let lookahead = encoder.lookahead().map_err(Error::OpusEncoder)?;
         Ok(Self {
@@ -154,6 +165,42 @@ mod tests {
     use std::error::Error as _;
 
     const OPUS_GET_DTX_REQUEST: i32 = 4017;
+
+    #[test]
+    fn dtx_keeps_small_packets_and_their_sample_intervals() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = || {
+            AudioGenerator::with_bursts(
+                AudioPattern::Tone {
+                    amplitude: 4000,
+                    period: 120,
+                },
+                vec![0..9600, 76800..86400],
+            )
+        };
+        let mut continuous = OpusGenerator::new(source()?, OpusConfig::default())?;
+        let mut dtx = OpusGenerator::new(source()?, OpusConfig::default().with_dtx(true))?;
+        assert_eq!(dtx.encoder.encoder_ctl_request(OPUS_GET_DTX_REQUEST)?, 1);
+        let (mut continuous_bytes, mut dtx_bytes, mut small_packets) = (0, 0, 0);
+        for index in 0..100 {
+            let full = continuous.generate()?;
+            let packet = dtx.generate()?;
+            assert_eq!(packet.metadata, full.metadata);
+            assert_eq!(packet.metadata.first_sample_index, index * 960);
+            assert_eq!(packet.metadata.sample_count, 960);
+            assert!(!packet.bytes.is_empty());
+            assert_eq!(
+                audiopus::packet::nb_samples(&packet.bytes, SampleRate::Hz48000)?,
+                960
+            );
+            continuous_bytes += full.bytes.len();
+            dtx_bytes += packet.bytes.len();
+            small_packets += usize::from(packet.bytes.len() <= 2);
+        }
+        assert!(small_packets > 0);
+        assert!(dtx_bytes < continuous_bytes);
+        Ok(())
+    }
 
     #[test]
     fn repair_hints_reach_the_encoder() -> Result<(), Box<dyn std::error::Error>> {
