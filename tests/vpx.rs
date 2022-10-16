@@ -96,20 +96,44 @@ fn vp8_keeps_source_steps_and_rejects_h264_inspection() -> Result<(), Error> {
         EncodeOutcome::Emitted { bytes, .. } => assert_eq!(bytes, &saved),
         _ => unreachable!(),
     }
+    let mut wrong_codec = Clip::new(VideoConfig::default(), 1, saved.len());
     assert!(matches!(
-        Clip::new(VideoConfig::default(), 1, saved.len()).push(first),
+        wrong_codec.push(first),
         Err(Error::UnsupportedCodec(Codec::Vp8))
     ));
-    let skip = EncodeOutcome::Skipped {
+    assert!(wrong_codec.frames().is_empty());
+    let mut clip = Clip::new(config, 3, saved.len());
+    let address = saved.as_ptr();
+    clip.push(EncodeOutcome::Emitted {
         metadata: mirage::FrameMetadata {
             source_index: 0,
             timestamp: std::time::Duration::from_secs(0),
         },
+        bytes: saved,
+        kind: FrameKind::Vp8Key,
+    })?;
+    assert!(clip.frames()[0].is_refresh());
+    assert!(!clip.frames()[0].has_sps && !clip.frames()[0].has_pps && !clip.frames()[0].has_idr);
+    match &clip.frames()[0].outcome {
+        EncodeOutcome::Emitted { bytes, .. } => assert_eq!(bytes.as_ptr(), address),
+        _ => unreachable!(),
+    }
+    let skip = EncodeOutcome::Skipped {
+        metadata: mirage::FrameMetadata {
+            source_index: 2,
+            timestamp: std::time::Duration::from_millis(33),
+        },
     };
-    assert!(matches!(
-        Clip::new(config, 1, 0).push(skip),
-        Err(Error::UnsupportedCodec(Codec::Vp8))
-    ));
+    clip.push(skip)?;
+    assert!(!clip.frames()[1].is_refresh());
+    assert_eq!(clip.frames().len(), 2);
+    assert_eq!(
+        clip.encoded_bytes(),
+        match &clip.frames()[0].outcome {
+            EncodeOutcome::Emitted { bytes, .. } => bytes.len(),
+            _ => unreachable!(),
+        }
+    );
     let bitrate =
         VideoConfig::new(16, 16, i32::MAX as u32, Pattern::Checkerboard)?.with_codec(Codec::Vp8);
     assert!(matches!(

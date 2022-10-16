@@ -1,4 +1,4 @@
-use crate::{Codec, Config, EncodeOutcome, Error, FrameMetadata};
+use crate::{Codec, Config, EncodeOutcome, Error, FrameKind, FrameMetadata};
 
 #[derive(Debug)]
 pub struct ClipFrame {
@@ -6,6 +6,20 @@ pub struct ClipFrame {
     pub has_sps: bool,
     pub has_pps: bool,
     pub has_idr: bool,
+}
+
+impl ClipFrame {
+    /// Refresh evidence from the recorded source, not a decodability guarantee.
+    pub fn is_refresh(&self) -> bool {
+        self.has_sps && self.has_pps && self.has_idr
+            || matches!(
+                self.outcome,
+                EncodeOutcome::Emitted {
+                    kind: FrameKind::Vp8Key,
+                    ..
+                }
+            )
+    }
 }
 
 pub struct Clip {
@@ -33,11 +47,13 @@ impl Clip {
     ///
     /// [`Error::InvalidClipOrder`] for non-increasing indices or times,
     /// [`Error::ClipStepLimit`], [`Error::ClipByteLimit`], [`Error::UnsupportedCodec`]
-    /// for VP8 or [`EncodeOutcome::h264_headers`] errors.
+    /// for a mismatched codec or [`EncodeOutcome::h264_headers`] errors.
     /// Rejection leaves the clip unchanged.
     pub fn push(&mut self, outcome: EncodeOutcome) -> Result<(), Error> {
-        if self.config.codec() != Codec::H264 {
-            return Err(Error::UnsupportedCodec(self.config.codec()));
+        if let EncodeOutcome::Emitted { kind, .. } = &outcome {
+            if kind.codec() != self.config.codec() {
+                return Err(Error::UnsupportedCodec(kind.codec()));
+            }
         }
         let current = metadata(&outcome);
         if let Some(last) = self.frames.last() {
@@ -58,13 +74,17 @@ impl Clip {
         if byte_count > self.max_bytes - self.encoded_bytes {
             return Err(Error::ClipByteLimit);
         }
-        let (has_sps, has_pps, has_idr) = match outcome.h264_headers()? {
-            Some(headers) => (
-                headers.sps.is_some(),
-                headers.pps.is_some(),
-                headers.has_idr,
-            ),
-            None => (false, false, false),
+        let (has_sps, has_pps, has_idr) = if self.config.codec() == Codec::H264 {
+            match outcome.h264_headers()? {
+                Some(headers) => (
+                    headers.sps.is_some(),
+                    headers.pps.is_some(),
+                    headers.has_idr,
+                ),
+                None => (false, false, false),
+            }
+        } else {
+            (false, false, false)
         };
         self.encoded_bytes += byte_count;
         self.frames.push(ClipFrame {

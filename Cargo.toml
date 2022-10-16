@@ -27,10 +27,6 @@ required-features = ["h264"]
 name = "generator"
 required-features = ["h264"]
 
-[[example]]
-name = "render"
-required-features = ["h264"]
-
 [[test]]
 name = "vpx"
 required-features = ["vp8"]

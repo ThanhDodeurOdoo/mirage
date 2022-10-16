@@ -1,5 +1,5 @@
 use mirage::{
-    clock_ticks, compare_frames, read_identity, EncodeOutcome, FrameKind, FrameMetadata,
+    clock_ticks, compare_frames, read_identity, Codec, EncodeOutcome, FrameKind, FrameMetadata,
     Observation,
 };
 use std::env;
@@ -72,16 +72,43 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn read_index(index: &str) -> Result<Vec<EncodeOutcome>, Box<dyn Error>> {
     let mut lines = index.lines();
-    if lines.next() != Some(HEADER) {
-        return Err(invalid("unexpected fixture index header").into());
-    }
+    let with_codec = match lines.next() {
+        Some(header) if header == HEADER => false,
+        Some(header) if header == format!("{}\tcodec", HEADER) => true,
+        _ => return Err(invalid("unexpected fixture index header").into()),
+    };
     let mut expected = Vec::new();
     let mut previous: Option<FrameMetadata> = None;
     let mut next_offset = 0u64;
+    let mut codec = None;
     for (line, row) in lines.enumerate() {
         let fields: Vec<_> = row.split('\t').collect();
         let malformed = || invalid(&format!("invalid fixture index row {}", line + 2));
-        if fields.len() != 10 || fields[6..].iter().any(|value| !matches!(*value, "0" | "1")) {
+        if fields.len() != if with_codec { 11 } else { 10 }
+            || fields[6..10]
+                .iter()
+                .any(|value| !matches!(*value, "0" | "1"))
+        {
+            return Err(malformed().into());
+        }
+        let row_codec = if with_codec {
+            match fields[10] {
+                "h264" => Codec::H264,
+                "vp8" => Codec::Vp8,
+                _ => return Err(malformed().into()),
+            }
+        } else {
+            Codec::H264
+        };
+        if let Some(codec) = codec {
+            if codec != row_codec {
+                return Err(invalid("fixture codec must not change").into());
+            }
+        } else {
+            codec = Some(row_codec);
+            next_offset = if row_codec == Codec::Vp8 { 32 } else { 0 };
+        }
+        if row_codec == Codec::Vp8 && fields[6..9] != ["0", "0", "0"] {
             return Err(malformed().into());
         }
         let source_index: u64 = fields[0].parse().map_err(|_| malformed())?;
@@ -104,8 +131,11 @@ fn read_index(index: &str) -> Result<Vec<EncodeOutcome>, Box<dyn Error>> {
         }
         let offset: u64 = fields[3].parse().map_err(|_| malformed())?;
         let length: u64 = fields[4].parse().map_err(|_| malformed())?;
+        if row_codec == Codec::Vp8 && fields[2] == "emitted" {
+            next_offset = next_offset.checked_add(12).ok_or_else(malformed)?;
+        }
         if offset != next_offset {
-            return Err(invalid("fixture byte offsets must be contiguous").into());
+            return Err(invalid("fixture byte offsets must follow its framing").into());
         }
         next_offset = offset.checked_add(length).ok_or_else(malformed)?;
         let outcome = match fields[2] {
@@ -117,6 +147,8 @@ fn read_index(index: &str) -> Result<Vec<EncodeOutcome>, Box<dyn Error>> {
                     "I" => FrameKind::I,
                     "P" => FrameKind::P,
                     "IpMixed" => FrameKind::IpMixed,
+                    "Vp8Key" => FrameKind::Vp8Key,
+                    "Vp8Inter" => FrameKind::Vp8Inter,
                     _ => return Err(malformed().into()),
                 },
             },
@@ -125,6 +157,11 @@ fn read_index(index: &str) -> Result<Vec<EncodeOutcome>, Box<dyn Error>> {
             }
             _ => return Err(malformed().into()),
         };
+        if let EncodeOutcome::Emitted { kind, .. } = &outcome {
+            if kind.codec() != row_codec {
+                return Err(malformed().into());
+            }
+        }
         expected.push(outcome);
         previous = Some(metadata);
     }
