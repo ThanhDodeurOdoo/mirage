@@ -1,0 +1,1 @@
+- to update, can maybe used for https://github.com/odoo/o-sfu
